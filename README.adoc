@@ -1,0 +1,70 @@
+= Asami Database Plugin for Fulcro RAD
+
+Status: Pre-alpha, under development.
+
+== FIXME
+
+When to call `asami.shutdown` ?
+
+== WIP
+
+* Deal with the fact that we cannot create an entity (with an `:id`) AND add a ref to it from an existing entity in a single tx
+     ** Use `{}` form for ALL attributes of new entities (w/o refs to new); split out refs to new entities and run them in a follow up tx
+
+
+=== TODO
+
+1. Review and clean up code
+2. Can Asami store keywords?
+
+
+== Usage
+
+```clojure
+(ns com.example.components.parser
+  (:require
+    [com.example.model :as your-model]
+    [com.fulcrologic.rad.attributes :as attr]
+    [com.fulcrologic.rad.form :as form]
+    [com.fulcrologic.rad.middleware.save-middleware :as r.s.middleware]
+    [com.fulcrologic.rad.pathom :as pathom]
+    [com.fulcrologic.rad.resolvers :as res]
+    [cz.holyjak.rad.database-adapters.asami :as asami]
+    [cz.holyjak.rad.database-adapters.asami-options :as aso]))
+
+;; config should contain the key ::aso/databases, see start-connections docstring
+(def asami-connections (asami/start-connections config))
+
+(def automatic-resolvers
+  (vec
+    (concat
+      (res/generate-resolvers your-model/all-attributes)
+      (asami/generate-resolvers your-model/all-attributes :production))))
+
+(def save-middleware (r.s.middleware/wrap-rewrite-values (asami/wrap-save)))
+
+(def parser
+    (pathom/new-parser {#_"your config here..."}
+        [(attr/pathom-plugin all-attributes)
+         (form/pathom-plugin save-middleware (asami/wrap-delete))
+         (asami/pathom-plugin (fn [env] asami-connections))]
+        [automatic-resolvers your-model/custom-resolvers]))
+```
+
+== Limitations
+
+* Not implemented
+  ** All IDs must be uuids (for the time being)
+  ** Custom attribute names - attribute qualified name must be same as what is stored in Asami
+  ** Top-level query must include the id attribute
+  ** Exactly one element of `ao/identities` (???)
+  ** Native IDs as entity IDs
+  ** Multiple databases / schemas (used for sharding)
+* Extra requirements
+  ** Each entity in Asami is expected to have both `:<entity>/id <id>`
+     (so that queries can check for entity type: `[?e :entity/id]`)
+     and `:id [:<entity>/id <id>]` (so we can look the entity up eg. in d/entity)
+* No schema generation, b/c there is no schema in Asami
+* Requires Clojure 1.11 (could easily be backported...)
+* Surprising behavior
+  ** Multi-valued attributes are stored as *sets* (I plan to add `asami-options/no-set?` so you can opt out of it)

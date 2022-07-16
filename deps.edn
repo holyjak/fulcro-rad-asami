@@ -1,0 +1,20 @@
+{;:paths   ["src/shared" "src/asami"]
+
+ :deps    {org.clojars.quoll/asami {:mvn/version "2.3.2"}
+           com.fulcrologic/fulcro-rad             {:mvn/version "1.1.0-RC6"}
+           com.wsscode/pathom                     {:mvn/version "2.3.1"}
+           edn-query-language/eql                 {:mvn/version "1.0.1"}
+           com.taoensso/encore                    {:mvn/version "3.1.0"}
+           com.fulcrologic/guardrails             {:mvn/version "1.1.5"}
+
+           ;; Unified logging for server
+           com.taoensso/timbre                    {:mvn/version "5.0.0"}
+          
+           org.clojure/clojurescript              {:mvn/version "1.11.54"} ; 1.11.54 adds update-vals
+           org.clojure/clojure                    {:mvn/version "1.11.0"}}
+
+ :aliases {:test      {:extra-paths ["test"]
+                       :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}}}
+
+           :run-tests {:main-opts  ["-m" "kaocha.runner"]
+                       :extra-deps {lambdaisland/kaocha {:mvn/version "1.0.732"}}}}}
