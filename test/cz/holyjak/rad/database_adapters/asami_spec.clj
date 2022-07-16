@@ -370,7 +370,7 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "save-form!" :focus
-               (let [_       @(d/transact *conn* [{::address/id (ids/new-uuid 1) ::address/street "A St"}])
+               (let [_       @(d/transact *conn* [(write/new-entity-tx nil [::address/id (ids/new-uuid 1)] {::address/street "A St"})])
                      expected-id (ids/new-uuid 100)
                      tempid1 (tempid/tempid expected-id)
                      delta {[::person/id tempid1] {::person/id tempid1

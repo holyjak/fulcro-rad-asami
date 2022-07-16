@@ -32,10 +32,10 @@
       :otherwise ident)))
 
 (defn to-one? [{::attr/keys [key->attribute]} k]            ; copied from datomic-common
-  (not (boolean (some-> (get key->attribute k) (attr/to-many?)))))
+  (when key->attribute (not (boolean (some-> (get key->attribute k) (attr/to-many?))))))
 
 (defn ref? [{::attr/keys [key->attribute]} k]               ; copied from datomic-common
-  (= :ref (some-> k key->attribute ::attr/type)))
+  (when key->attribute (= :ref (some-> k key->attribute ::attr/type))))
 
 (defn schema-value?                                         ; copied from datomic-common (+ add docs)
   "The attribute belongs to the current schema (= DB) and is a value, i.e. not the ID"
@@ -93,7 +93,10 @@
   [k]
   (keyword (namespace k) (str (name k) \')))
 
-(defn ->entity-transactions [{:keys [tempid->real-id] :as env+} operation eid k vals]
+(defn ->entity-transactions
+  "Create tx quadruplets: `[:db/add|remove <entity id/lookup> <property> <value>]`, one for each of `vals`, with
+  encoding references in the way Asami expects and marking replacements of an existing value as such."
+  [{:keys [tempid->real-id] :as env+} operation eid k vals]
   (let [ref (ref? env+ k)
         singular? (to-one? env+ k)
         new-entity? (-> eid meta ::new?)]
@@ -129,6 +132,29 @@
           (->entity-transactions env+ :db/add eid k (set/difference after before))
           (->entity-transactions env+ :db/retract eid k (set/difference before after)))))))
 
+(defn new-entity-tx
+  "Create an ({} form) transaction to insert a new entity into Asami.
+  Ensure proper storage of the ident."
+  [env [id-prop id-value :as ident] own-props]
+  (into
+    {id-prop id-value                ; the id attribute itself, e.g. `:person/id <val>`
+     :id ident}                      ; ident as Asami's :id for lookups
+    (map (fn asamify-val [[prop value]]
+           (let [to-many?? (not (to-one? env prop)),
+                 ;; NOTE: Currently ref?? always false as we offload all refs to `tmp-refs` for *now* [do we?!]
+                 ref?? (ref? env prop)]
+             [prop (cond->> value
+                            (and to-many?? ref??)
+                            (map #(asamify-ref nil %))
+
+                            (and (not to-many??) ref??)
+                            (asamify-ref nil)
+
+                            ;; many-valued values should be *sets* for Asami; could cause issues though..
+                            ;; FIXME Support asami-options/no-set? to prevent attribute set-ification
+                            to-many?? (set))])))
+    own-props))
+
 ;(defn new-entity-txn->entity-map
 ;  ""
 ;  [new? entity-txn])
@@ -144,36 +170,24 @@
   ;; which must be transacted later.
   [{::attr/keys [key->attribute] :as env} [_ [id-prop id-value :as ident] :as eid] entity-delta]
   ;when (and (tempid/tempid? id) (uuid-ident? env ident))
-  (let [prop->val (update-vals entity-delta :after)
+  (let [prop->val (update-vals entity-delta :after) ; only retain the new values
         as-col (fn as-col [[prop value]]
+                 ;; Ensure that the `value` is always a vector, even for to-one props
                  (cond-> value (to-one? env prop) (vector)))
 
-        {tmp-refs true, own-props false}
+        ;; Group props into simple value props and "foreign key" to new entity props + split multi-valued props
+        ;; (as some vals of a to-many ref could point to new entities while others to existing ones)
+        {tmp-refs :ref2tempid, own-props :other}
         (->
           (->> prop->val
+               ;; Split multi-valued props into a seq of [k v1] [k v2] ... [k vn]
                (mapcat (fn [[k vs :as entry]] (if (to-one? env k) [entry] (map (partial vector k) vs))))
                (group-by (fn new-entity-ref? [[prop maybe-ident]]
-                           (boolean (and (ref? env prop) (tempid/tempid? (second maybe-ident)))))))
-          (update-vals #(map second)))
+                           (if (and (ref? env prop) (tempid/tempid? (second maybe-ident))) :ref2tempid :other))))
+          #_(update-vals #(map second))) ; TODO: Why was this here? (also, it is broken, missing %)
 
-        create-entity-tx (into
-                           {id-prop id-value                ; the id attribute itself, e.g. `:person/id <val>`
-                            :id ident}                      ; ident as Asami's :id for lookups
-                           (map (fn asamify-val [[prop value]]
-                                  (let [to-many?? (not (to-one? env prop)),
-                                        ;; NOTE: Currently ref?? always false as we offload all refs to `tmp-refs` for *now*
-                                        ref?? (ref? env prop)]
-                                    [prop (cond->> value
-                                                   (and to-many?? ref??)
-                                                   (map #(asamify-ref nil %))
-
-                                                   (and (not to-many??) ref??)
-                                                   (asamify-ref nil)
-
-                                                   ;; many-valued values should be *sets* for Asami; could cause issues though..
-                                                   ;; FIXME Support asami-options/no-set? to prevent attribute set-ification
-                                                   to-many?? (set))])))
-                           own-props)]
+        ;; We create the entity using the {} tx b/c it is less work for me than generating the quadruplets
+        create-entity-tx (new-entity-tx env ident own-props)]
     (into [create-entity-tx]
           (mapcat #(->entity-transactions env :db/add eid (key %) (as-col %)))
           tmp-refs)))
