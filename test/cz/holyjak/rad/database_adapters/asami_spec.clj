@@ -5,6 +5,7 @@
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.form :as form]
+    [com.fulcrologic.rad.pathom :as pathom]
     [cz.holyjak.rad.database-adapters.asami :as asami]
     [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.pathom :as asami-pathom]
@@ -369,7 +370,7 @@
 ;;; Save Form Integration
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(specification "save-form!" :focus
+(specification "save-form!"
                (let [_       @(d/transact *conn* [(write/new-entity-tx nil [::address/id (ids/new-uuid 1)] {::address/street "A St"})])
                      expected-id (ids/new-uuid 100)
                      tempid1 (tempid/tempid expected-id)
@@ -384,7 +385,6 @@
                                 {::asami/id-attribute {::attr/qualified-key ::person/id}}
                                 {::person/id real-id}
                                 (d/db *conn*))]
-                   (def *db (d/db *conn*)) (println "JHDBG: person" person)              ; FIXME rm
                    (assertions
                      "Gives a proper remapping"
                      (get tempids tempid1) =fn=> uuid?
@@ -399,19 +399,6 @@
                                         #_#_::person/primary-address {:id [::address/id (ids/new-uuid 1)]}})
                      "Sets the ref to primary address (and entity-query returns just the ref)"
                      (::person/primary-address person) => {:id [::address/id (ids/new-uuid 1)]}))))
-
-(comment
-  (d/q `[:find ?e ?a ?v :where [?e ?a ?v]
-         [?e :id [::person/id #uuid"ffffffff-ffff-ffff-ffff-000000000100"]]
-         ;[?e :cz.holyjak.rad.test-schema.person/id ~(ids/new-uuid 100)]
-         ] *db)
-  (query/entity-query
-    {::asami/id-attribute {::attr/qualified-key ::person/id}}
-    {::person/id (ids/new-uuid 100)}
-    *db)
-
-  (d/entity *db [::person/id #uuid"ffffffff-ffff-ffff-ffff-000000000100"])
-  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping
@@ -433,75 +420,77 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Round-trip tests
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;
-;(specification "Pathom parser integration (save + generated resolvers)"
-;               (let [save-middleware     (datomic/wrap-datomic-save)
-;                     delete-middleware   (datomic/wrap-datomic-delete)
-;                     automatic-resolvers (datomic/generate-resolvers all-attributes :production)
-;                     parser              (pathom/new-parser {}
-;                                                            [(attr/pathom-plugin all-attributes)
-;                                                             (form/pathom-plugin save-middleware delete-middleware)
-;                                                             (datomic/pathom-plugin (fn [env] {:production *conn*}))]
-;                                                            [automatic-resolvers form/resolvers])]
-;                 (component "Saving new items (native ID)"
-;                            (let [temp-person-id (tempid/tempid)
-;                                  delta          {[::person/id temp-person-id] {::person/id        {:after temp-person-id}
-;                                                                                ::person/full-name {:after "Bob"}}}
-;                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
-;                                                                                            ::form/master-pk ::person/id
-;                                                                                            ::form/delta     delta}) [:tempids ::person/id ::person/full-name]}])
-;                                  {:keys [tempids]} save-form
-;                                  real-id        (get tempids temp-person-id)
-;                                  entity         (dissoc save-form :tempids)]
-;                              (assertions
-;                                "Includes the remapped (native) ID for native id attribute"
-;                                (pos-int? real-id) => true
-;                                "Returns the newly-created attributes"
-;                                entity => {::person/id        real-id
-;                                           ::person/full-name "Bob"})))
-;                 (component "Saving new items (generated ID)"
-;                            (let [temp-address-id (tempid/tempid)
-;                                  delta           {[::address/id temp-address-id] {::address/id     {:after temp-address-id}
-;                                                                                   ::address/street {:after "A St"}}}
-;                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-address-id
-;                                                                                            ::form/master-pk ::address/id
-;                                                                                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}])
-;                                  {:keys [tempids]} save-form
-;                                  real-id         (get tempids temp-address-id)
-;                                  entity          (dissoc save-form :tempids)]
-;                              (assertions
-;                                "Includes the remapped (UUID) ID for id attribute"
-;                                (uuid? real-id) => true
-;                                "Returns the newly-created attributes"
-;                                entity => {::address/id     real-id
-;                                           ::address/street "A St"})))
-;                 (component "Saving a tree"
-;                            (let [temp-person-id  (tempid/tempid)
-;                                  temp-address-id (tempid/tempid)
-;                                  delta           {[::person/id temp-person-id]
-;                                                   {::person/id              {:after temp-person-id}
-;                                                    ::person/role            {:after :cz.holyjak.rad.test-schema.person.role/admin}
-;                                                    ::person/primary-address {:after [::address/id temp-address-id]}}
-;
-;                                                   [::address/id temp-address-id]
-;                                                   {::address/id     {:after temp-address-id}
-;                                                    ::address/street {:after "A St"}}}
-;                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
-;                                                                                            ::form/master-pk ::person/id
-;                                                                                            ::form/delta     delta})
-;                                                                          [:tempids ::person/id ::person/role
-;                                                                           {::person/primary-address [::address/id ::address/street]}]}])
-;                                  {:keys [tempids]} save-form
-;                                  addr-id         (get tempids temp-address-id)
-;                                  person-id       (get tempids temp-person-id)
-;                                  entity          (dissoc save-form :tempids)]
-;                              (assertions
-;                                "Returns the newly-created graph"
-;                                entity => {::person/id              person-id
-;                                           ::person/role            :cz.holyjak.rad.test-schema.person.role/admin
-;                                           ::person/primary-address {::address/id     addr-id
-;                                                                     ::address/street "A St"}})))))
-;
+
+(specification "Pathom parser integration (save + generated resolvers)" :focus
+               (let [save-middleware     (asami-pathom/wrap-save)
+                     delete-middleware   (asami-pathom/wrap-delete)
+                     automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
+                     parser              (pathom/new-parser {}
+                                                            [(attr/pathom-plugin all-attributes)
+                                                             (form/pathom-plugin save-middleware delete-middleware)
+                                                             (asami-pathom/pathom-plugin (fn [env] {:production *conn*}))]
+                                                            [automatic-resolvers form/resolvers])]
+                 #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)
+                 (component "Saving new items (native ID)"
+                            (let [temp-person-id (tempid/tempid)
+                                  delta          {[::person/id temp-person-id] {::person/id        {:after temp-person-id}
+                                                                                ::person/full-name {:after "Bob"}}}
+                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
+                                                                                            ::form/master-pk ::person/id
+                                                                                            ::form/delta     delta})
+                                                                          [:tempids ::person/id ::person/full-name]}])
+                                  {:keys [tempids]} save-form
+                                  real-id        (get tempids temp-person-id)
+                                  entity         (dissoc save-form :tempids)]
+                              (assertions
+                                "Includes the remapped (native) ID for native id attribute"
+                                (pos-int? real-id) => true
+                                "Returns the newly-created attributes"
+                                entity => {::person/id        real-id
+                                           ::person/full-name "Bob"})))
+                 (component "Saving new items (generated ID)"
+                            (let [temp-address-id (tempid/tempid)
+                                  delta           {[::address/id temp-address-id] {::address/id     {:after temp-address-id}
+                                                                                   ::address/street {:after "A St"}}}
+                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-address-id
+                                                                                            ::form/master-pk ::address/id
+                                                                                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}])
+                                  {:keys [tempids]} save-form
+                                  real-id         (get tempids temp-address-id)
+                                  entity          (dissoc save-form :tempids)]
+                              (assertions
+                                "Includes the remapped (UUID) ID for id attribute"
+                                (uuid? real-id) => true
+                                "Returns the newly-created attributes"
+                                entity => {::address/id     real-id
+                                           ::address/street "A St"})))
+                 (component "Saving a tree"
+                            (let [temp-person-id  (tempid/tempid)
+                                  temp-address-id (tempid/tempid)
+                                  delta           {[::person/id temp-person-id]
+                                                   {::person/id              {:after temp-person-id}
+                                                    ::person/role            {:after :cz.holyjak.rad.test-schema.person.role/admin}
+                                                    ::person/primary-address {:after [::address/id temp-address-id]}}
+
+                                                   [::address/id temp-address-id]
+                                                   {::address/id     {:after temp-address-id}
+                                                    ::address/street {:after "A St"}}}
+                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-person-id
+                                                                                            ::form/master-pk ::person/id
+                                                                                            ::form/delta     delta})
+                                                                          [:tempids ::person/id ::person/role
+                                                                           {::person/primary-address [::address/id ::address/street]}]}])
+                                  {:keys [tempids]} save-form
+                                  addr-id         (get tempids temp-address-id)
+                                  person-id       (get tempids temp-person-id)
+                                  entity          (dissoc save-form :tempids)]
+                              (assertions
+                                "Returns the newly-created graph"
+                                entity => {::person/id              person-id
+                                           ::person/role            :cz.holyjak.rad.test-schema.person.role/admin
+                                           ::person/primary-address {::address/id     addr-id ; FIXME - the address is missing
+                                                                     ::address/street "A St"}})))))
+
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Attr Options Tests
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;

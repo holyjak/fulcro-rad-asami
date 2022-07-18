@@ -1,6 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami.pathom
   (:require
-    #?(:cljs [cz.holyjak.rad.database-adapters.asami.tmp-update-vals :refer [update-vals]])
     [asami.core :as d]
     [clojure.pprint :refer [pprint]]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
@@ -14,6 +13,7 @@
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [com.fulcrologic.rad.authorization :as auth]
     [com.wsscode.pathom.connect :as pc]
+    [com.wsscode.pathom.core :as p]
     [taoensso.encore :as enc]
     [taoensso.timbre :as log]))
 
@@ -163,8 +163,17 @@
 (defn generate-resolvers [attributes schema]
   (dups/generate-resolvers id-resolver attributes schema))
 
-(defn pathom-plugin [database-mapper]
-  (dups/pathom-plugin (fn [env] (update-vals (database-mapper env) d/db))))
+(defn pathom-plugin
+  "Instantiate a pathom plugin for Asami connections and DB.
+  - `database-mapper` - a `(fn [env]) -> map from a schema to an Asami connection"
+  [database-mapper]
+  (p/env-wrap-plugin
+    (fn [env]
+      (let [database-connection-map (database-mapper env)
+            databases               (update-vals database-connection-map (comp atom d/db))]
+        (assoc env
+          aso/connections database-connection-map
+          aso/databases databases)))))
 
 (comment
   (def *env (mock-resolver-env :production (d/connect (asami-core/config->url {:asami/driver :local, :asami/database "playground3"}))))
