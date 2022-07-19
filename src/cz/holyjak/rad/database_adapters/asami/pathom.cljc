@@ -1,6 +1,7 @@
 (ns cz.holyjak.rad.database-adapters.asami.pathom
   (:require
     [asami.core :as d]
+    [edn-query-language.core :as eql]
     [clojure.pprint :refer [pprint]]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
@@ -10,6 +11,7 @@
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.query :as query]
+    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ref? to-one?]]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [com.fulcrologic.rad.authorization :as auth]
     [com.wsscode.pathom.connect :as pc]
@@ -74,7 +76,7 @@
             (group-by
               (every-pred vector? tx-with-ref2new)
               txn)]
-        (doseq [txn' [txs1 txs2]]
+        (doseq [txn' (remove empty? [txs1 txs2])]
           (log/debug "Running txn\n" (with-out-str (pprint txn')))
           (if (and connection (seq txn'))
             (try
@@ -88,7 +90,10 @@
               (catch #?(:clj Exception :cljs :default) e
                 (log/error e "Transaction failed!")
                 {}))
-            (log/error "Unable to save form. Either connection was missing in env, or txn was empty.")))))
+            (log/error "Unable to save form:"
+                       (cond
+                         (not connection) (str "connection is missing in env for schema " schema "; has: " (keys (get env aso/connections)))
+                         (empty? txn') "the transaction is empty"))))))
     @result))
 
 (defn- deep-merge
@@ -121,6 +126,13 @@
    (fn [{::form/keys [params] :as pathom-env}]
      (delete-entity! pathom-env params))))
 
+(defn asami-ref->pathom
+  "Translate Asami ref like `{:id val}` where val is for us always an ident into
+  `{<ident prop> <ident val>}`, e.g. `{::address/id #uuid '123'}`"
+  [x]
+  {:pre [(map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x))]}
+  (->> x :id (apply hash-map)))
+
 (defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
   [all-attributes
@@ -146,6 +158,12 @@
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input
                                      db)
+                                   (reduce-kv
+                                     (fn [m k v]
+                                       (assoc m k (cond->> v
+                                                           (ref? env k)
+                                                           (util/update-attr-val env k asami-ref->pathom))))
+                                     {})
                                    (auth/redact env))))
                           wrap-resolve (wrap-resolve)
                           :always (with-resolve-sym))}))
@@ -170,7 +188,7 @@
   (p/env-wrap-plugin
     (fn [env]
       (let [database-connection-map (database-mapper env)
-            databases               (update-vals database-connection-map (comp atom d/db))]
+            databases               (update-vals database-connection-map (comp atom d/db util/ensure!))]
         (assoc env
           aso/connections database-connection-map
           aso/databases databases)))))

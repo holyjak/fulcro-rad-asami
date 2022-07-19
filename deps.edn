@@ -14,6 +14,10 @@
            org.clojure/clojure                    {:mvn/version "1.11.0"}}
 
  :aliases {:test      {:extra-paths ["test"]
+                       :jvm-opts ["-XX:-OmitStackTraceInFastThrow" "-XX:MaxJavaStackTraceDepth=1000000"
+                                  ;"-XX:+ShowCodeDetailsInExceptionMessages" ; see https://openjdk.java.net/jeps/358 - JDK 14+
+                                  ;; opts to support clj-async-profiler:
+                                  "-Djdk.attach.allowAttachSelf" "-XX:+UnlockDiagnosticVMOptions" "-XX:+DebugNonSafepoints"]
                        :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}}}
 
            :run-tests {:main-opts  ["-m" "kaocha.runner"]

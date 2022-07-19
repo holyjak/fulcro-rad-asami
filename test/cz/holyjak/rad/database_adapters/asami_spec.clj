@@ -425,11 +425,11 @@
                (let [save-middleware     (asami-pathom/wrap-save)
                      delete-middleware   (asami-pathom/wrap-delete)
                      automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
-                     parser              (pathom/new-parser {}
-                                                            [(attr/pathom-plugin all-attributes)
-                                                             (form/pathom-plugin save-middleware delete-middleware)
-                                                             (asami-pathom/pathom-plugin (fn [env] {:production *conn*}))]
-                                                            [automatic-resolvers form/resolvers])]
+                     parser (pathom/new-parser {}
+                                               [(attr/pathom-plugin all-attributes)
+                                                (form/pathom-plugin save-middleware delete-middleware)
+                                                (asami-pathom/pathom-plugin (fn [env] {:production *conn*}))]
+                                               [automatic-resolvers form/resolvers])]
                  #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)
                  (component "Saving new items (native ID)"
                             (let [temp-person-id (tempid/tempid)
@@ -488,8 +488,21 @@
                                 "Returns the newly-created graph"
                                 entity => {::person/id              person-id
                                            ::person/role            :cz.holyjak.rad.test-schema.person.role/admin
-                                           ::person/primary-address {::address/id     addr-id ; FIXME - the address is missing
+                                           ::person/primary-address {::address/id     addr-id
                                                                      ::address/street "A St"}})))))
+
+(comment
+  (def repl-conn (start-connection))
+  (reset-db)
+  (let [parser (pathom/new-parser {}
+                                  [(attr/pathom-plugin all-attributes)
+                                   (asami-pathom/pathom-plugin (fn [env] {:production repl-conn}))]
+                                  [(asami-pathom/generate-resolvers all-attributes :production)])]
+    ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [{::person/primary-address [::address/id ::address/street]}]}])
+    (parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [::person/primary-address]}])
+    )
+
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Attr Options Tests

@@ -6,6 +6,7 @@
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
+    [cz.holyjak.rad.database-adapters.asami.util :refer [ref? to-one?]]
     [taoensso.timbre :as log]))
 
 (defn retract-entity [conn id]
@@ -30,12 +31,6 @@
       (tempid/tempid? id) (str (:id id))
       ;(and (native-ident? env ident) (pos-int? id)) id
       :otherwise ident)))
-
-(defn to-one? [{::attr/keys [key->attribute]} k]            ; copied from datomic-common
-  (when key->attribute (not (boolean (some-> (get key->attribute k) (attr/to-many?))))))
-
-(defn ref? [{::attr/keys [key->attribute]} k]               ; copied from datomic-common
-  (when key->attribute (= :ref (some-> k key->attribute ::attr/type))))
 
 (defn schema-value?                                         ; copied from datomic-common (+ add docs)
   "The attribute belongs to the current schema (= DB) and is a value, i.e. not the ID"
