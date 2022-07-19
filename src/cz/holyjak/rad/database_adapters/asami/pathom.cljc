@@ -72,28 +72,23 @@
                   {:keys [tempid->generated-id txn]} (write/delta->txn env schema delta)]]
 
       (log/debug "Saving form delta" (with-out-str (pprint delta)) "on schema" schema)
-      (let [{txs1 false, txs2 true}
-            (group-by
-              (every-pred vector? tx-with-ref2new)
-              txn)]
-        (doseq [txn' (remove empty? [txs1 txs2])]
-          (log/debug "Running txn\n" (with-out-str (pprint txn')))
-          (if (and connection (seq txn'))
-            (try
-              (let [database-atom (get-in env [aso/databases schema])
-                    ;; Mapping from Asami tempid (e.g. -1) to the assigned :db/id (e.g. #a/n [33])
-                    #_#_{txid->db-id :tempids} @(d/transact connection txn')]
-                @(d/transact connection txn')
-                (when database-atom
-                  (reset! database-atom (d/db connection)))
-                (swap! result update :tempids merge tempid->generated-id))
-              (catch #?(:clj Exception :cljs :default) e
-                (log/error e "Transaction failed!")
-                {}))
-            (log/error "Unable to save form:"
-                       (cond
-                         (not connection) (str "connection is missing in env for schema " schema "; has: " (keys (get env aso/connections)))
-                         (empty? txn') "the transaction is empty"))))))
+      (if (and connection (seq txn))
+        (try
+          (log/debug "Running txn\n" (with-out-str (pprint txn)))
+          (let [database-atom (get-in env [aso/databases schema])
+                ;; Mapping from Asami tempid (e.g. -1) to the assigned :db/id (e.g. #a/n [33])
+                #_#_{txid->db-id :tempids} @(d/transact connection txn')]
+            @(d/transact connection txn)
+            (when database-atom
+              (reset! database-atom (d/db connection)))
+            (swap! result update :tempids merge tempid->generated-id))
+          (catch #?(:clj Exception :cljs :default) e
+            (log/error e "Transaction failed!")
+            {}))
+        (log/error "Unable to save form:"
+                   (cond
+                     (not connection) (str "connection is missing in env for schema " schema "; has: " (keys (get env aso/connections)))
+                     (empty? txn) "the transaction is empty"))))
     @result))
 
 (defn- deep-merge
@@ -130,8 +125,15 @@
   "Translate Asami ref like `{:id val}` where val is for us always an ident into
   `{<ident prop> <ident val>}`, e.g. `{::address/id #uuid '123'}`"
   [x]
-  {:pre [(map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x))]}
-  (->> x :id (apply hash-map)))
+  (cond
+    ;; If we get [:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]]
+    (and (vector? x) (= 2 (count x)) (= :id (first x)) (eql/ident? (second x)))
+    (->> x second (apply hash-map))
+    ;; If we get {:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]}
+    (and (map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x)))
+    (->> x :id (apply hash-map))
+
+    :else x))
 
 (defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."

@@ -167,11 +167,15 @@
   ;; (if we supported native IDs then we could also (asami.grph/new-node long-id-value) but would need the
   ;; RAD attribute to decide
   (sequence
-    ;; NOTE: This will return just *IDs for refs*; ex.: `{:id [:address/id 123]}`. To return the full
+    ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
     ;; data of the child, we would need to pass the 3rd argument (nested?) as true
     (comp (map #(d/entity db [qualified-key %]))
           (remove nil?))
     ids))
+
+(comment
+  (ids->entities *db :cz.holyjak.rad.test-schema.person/id [#uuid "ffffffff-ffff-ffff-ffff-000000000100"])
+  (d/q '[:find ?a ?v :where [?e :cz.holyjak.rad.test-schema.person/id] [?e ?a ?v]] *db))
 
 ;; ± copied from https://github.com/fulcrologic/fulcro-rad-kvstore/blob/master/src/main/com/fulcrologic/rad/database_adapters/key_value/pathom.cljc
 (>defn entity-query

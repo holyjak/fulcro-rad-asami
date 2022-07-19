@@ -2,7 +2,7 @@
   (:require
     [com.fulcrologic.rad.attributes :as attr]))
 
-(defn- ensure! [x]
+(defn ensure! [x]
   (assert x)
   x)
 
@@ -11,6 +11,9 @@
 
 (defn ref? [{::attr/keys [key->attribute]} k]               ; copied from datomic-common
   (when key->attribute (= :ref (some-> k key->attribute ::attr/type))))
+
+(defn id? [{::attr/keys [key->attribute]} k]
+  (when key->attribute (some-> k key->attribute ::attr/identity?)))
 
 (defn update-attr-val
   "Apply the fn `f` to each value of the attribute `k` based on whether it is singular or multi-value"
