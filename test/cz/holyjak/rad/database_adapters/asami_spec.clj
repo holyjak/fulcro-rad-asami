@@ -26,9 +26,6 @@
                                  [qualified-key a]))
                           all-attributes))
 
-(comment
-  (cz.holyjak.rad.database-adapters.asami.util/id? {::attr/key->attribute key->attribute} ::person/id))
-
 (def ^:dynamic *conn* nil)
 (def ^:dynamic *env* {})
 
@@ -160,13 +157,13 @@
                      tempid2 (tempid/tempid (ids/new-uuid 102))
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
-                              [::address/id tempid2] {::address/street {:after "A1 St"}}}]
-                 (let [{:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})]
-                   (assertions
-                     ;"Returns a native ID remap for entity using native IDs"
-                     ;(pos-int? (get tempids tempid1)) => true
-                     "Returns a non-native ID remap for entity using uuid IDs"
-                     (uuid? (get tempids tempid2)) => true))))
+                              [::address/id tempid2] {::address/street {:after "A1 St"}}}
+                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})]
+                 (assertions
+                   ;"Returns a native ID remap for entity using native IDs"
+                   ;(pos-int? (get tempids tempid1)) => true
+                   "Returns a non-native ID remap for entity using uuid IDs"
+                   (uuid? (get tempids tempid2)) => true)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; delete
@@ -185,7 +182,7 @@
                      parser (pathom/new-parser {}
                                                [(attr/pathom-plugin all-attributes)
                                                 (form/pathom-plugin save-middleware delete-middleware)
-                                                (asami-pathom/pathom-plugin (fn [env] {:production *conn*}))]
+                                                (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
                                                [automatic-resolvers form/resolvers])]
                  #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)
                  (component "Saving new items (native ID)"
@@ -251,12 +248,12 @@
 (comment
   (def repl-conn (start-connection))
   (reset-db)
-  (let [parser (pathom/new-parser {}
+  (let [_parser (pathom/new-parser {}
                                   [(attr/pathom-plugin all-attributes)
-                                   (asami-pathom/pathom-plugin (fn [env] {:production repl-conn}))]
+                                   (asami-pathom/pathom-plugin (fn [_env] {:production repl-conn}))]
                                   [(asami-pathom/generate-resolvers all-attributes :production)])]
     ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [{::person/primary-address [::address/id ::address/street]}]}])
-    (parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [::person/primary-address]}])
+    ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [::person/primary-address]}])
     )
 
   )
