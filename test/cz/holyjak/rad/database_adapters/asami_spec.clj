@@ -64,33 +64,92 @@
   (let [existing-addr-ident [::address/id (ids/new-uuid 1)]
         _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data existing-addr-ident)
                                     [:db/add [:id existing-addr-ident] ::address/street "A St"]))
-        expected-id (ids/new-uuid 100)
-        tempid1 (tempid/tempid expected-id)
-        delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
-                                      ::person/full-name {:after "Bob"}
-                                      ::person/primary-address {:after [::address/id (ids/new-uuid 1)]}
-                                      ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
-               [::address/id (ids/new-uuid 1)] {::address/street {:before "A St" :after "A1 St"}}}]
-    (let [{:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
-          real-id (get tempids tempid1)
-          person (query/entity-query
-                   {::asami/id-attribute {::attr/qualified-key ::person/id}}
-                   {::person/id real-id}
-                   (d/db *conn*))]
-      (assertions
-        "Gives a proper remapping"
-        (get tempids tempid1) =fn=> uuid?
-        "Fulcro tempid is mapped to the uuid it wraps"
-        (get tempids tempid1) => expected-id
-        "Updates the db with non-ref attributes"
-        person =check=> (_/embeds?*
-                          {::person/id real-id
-                           ::person/full-name "Bob"
-                           ::person/role :cz.holyjak.rad.test-schema.person.role/admin
-                           ;::person/primary-address {::address/street "A1 St"}
-                           #_#_::person/primary-address {:id [::address/id (ids/new-uuid 1)]}})
-        "Sets the ref to primary address (and entity-query returns just the ref)"
-        (::person/primary-address person) => {:id [::address/id (ids/new-uuid 1)]}))))
+        id2 (ids/new-uuid 200)
+        id3 (ids/new-uuid 300)]
+    (component "A new entity referring to an existing one + update existing"
+               (let [expected-id (ids/new-uuid 100)
+                     tempid1 (tempid/tempid expected-id)
+                     delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
+                                                   ::person/full-name {:after "Bob"}
+                                                   ::person/primary-address {:after existing-addr-ident}
+                                                   ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
+                            existing-addr-ident {::address/id (second existing-addr-ident)
+                                                 ::address/street {:before "A St" :after "A1 St"}}}
+                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
+                     real-id (get tempids tempid1)
+                     person (query/entity-query
+                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::person/id real-id}
+                              (d/db *conn*))]
+                 (assertions
+                   "Gives a proper remapping"
+                   (get tempids tempid1) =fn=> uuid?
+                   "Fulcro tempid is mapped to the uuid it wraps"
+                   (get tempids tempid1) => expected-id
+                   "Updates the db with non-ref attributes"
+                   person =check=> (_/embeds?*
+                                     {::person/id real-id
+                                      ::person/full-name "Bob"
+                                      ::person/role :cz.holyjak.rad.test-schema.person.role/admin
+                                      ;::person/primary-address {::address/street "A1 St"}
+                                      #_#_::person/primary-address {:id existing-addr-ident}})
+                   "Sets the ref to primary address (and entity-query returns just the ref)"
+                   (::person/primary-address person) => {:id existing-addr-ident})))
+    (component "Two new entities, one referring to another"
+               (let [tempid2 (tempid/tempid id2)
+                     tempid3 (tempid/tempid id3)
+                     delta {[::person/id tempid2] {::person/id tempid2
+                                                   ::person/full-name {:after "Jo"}
+                                                   ::person/primary-address {:after [::address/id tempid3]}
+                                                   ::person/addresses {:after [existing-addr-ident [::address/id tempid3]]}
+                                                   ::person/role {:after :cz.holyjak.rad.test-schema.person.role/user}}
+                            [::address/id tempid3] {::address/id tempid3
+                                                    ::address/street {:after "B St"}}}
+                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
+                     person (query/entity-query
+                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::person/id (get tempids tempid2)}
+                              (d/db *conn*))]
+                 (assertions
+                   "Person tempid is mapped to the uuid it wraps"
+                   (get tempids tempid2) => id2
+                   "Address tempid is mapped to the uuid it wraps"
+                   (get tempids tempid3) => id3
+                   "Updates the db with non-ref attributes"
+                   person =check=> (_/embeds?*
+                                     {::person/id id2
+                                      ::person/full-name "Jo"
+                                      ::person/role :cz.holyjak.rad.test-schema.person.role/user
+                                      ;::person/primary-address {::address/street "A1 St"}
+                                      #_#_::person/primary-address {:id existing-addr-ident}})
+                   "Sets the ref to primary address (and entity-query returns just the Asami ref)"
+                   (::person/primary-address person) => {:id [::address/id id3]}
+                   "Sets refs to addresses (and returns them as Asami refs) - *as a set*"
+                   (::person/addresses person) => #{{:id existing-addr-ident} {:id [::address/id id3]}})))
+    (component "Update props and refs in entity (both to new & existing)"
+               (let [id4 (ids/new-uuid 400), tempid4 (tempid/tempid id4)
+                     delta {[::person/id id2] {::person/id id2
+                                               ::person/full-name {:before "Jo" :after "June"}
+                                               ::person/primary-address {:before [::address/id id3] :after existing-addr-ident}
+                                               ::person/addresses {:before [existing-addr-ident [::address/id id3]]
+                                                                   :after [existing-addr-ident [::address/id id4]]}
+                                               ::person/role {:before :cz.holyjak.rad.test-schema.person.role/user
+                                                              :after :cz.holyjak.rad.test-schema.person.role/admin}}
+                            [::address/id tempid4] {::address/id tempid4
+                                                    ::address/street {:after "C St"}}}
+                     _ (asami-pathom/save-form! *env* {::form/delta delta})
+                     person (query/entity-query
+                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::person/id id2}
+                              (d/db *conn*))]
+                 (assertions
+                   "Updates all singular, multi-valued and ref props as expected"
+                   person =check=> (_/embeds?*
+                                     {::person/id id2
+                                      ::person/full-name "June"
+                                      ::person/role :cz.holyjak.rad.test-schema.person.role/admin
+                                      ::person/primary-address {:id existing-addr-ident}
+                                      ::person/addresses #{{:id existing-addr-ident} {:id [::address/id id4]}}}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping
