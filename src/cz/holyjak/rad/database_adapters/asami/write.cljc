@@ -6,13 +6,18 @@
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
-    [cz.holyjak.rad.database-adapters.asami.util :refer [id? ref? to-one?]]))
+    [cz.holyjak.rad.database-adapters.asami.util :refer [id? ref? to-one?]]
+    [taoensso.timbre :as log]))
 
 (defn retract-entity [conn id]
-  (d/transact
-    conn
-    (d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
-         (d/db conn) id)))
+  (let [retract-txn (d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
+                         (d/db conn) id)
+        retract-id (first (filter #(= :id (nth % 2)) retract-txn))
+        _ (log/debug "Retracting entity `" (pr-str id) "` with:" (vec retract-txn))
+        res1 (d/transact conn retract-txn)
+        ;; TODO TMP Fix of Asami failing to retract :id if its value = another property Entry - https://github.com/quoll/asami/issues/5
+        res2 (when retract-id (d/transact conn [retract-id]))]
+    (or res2 res1)))
 
 (defn- uuid-ident?                                          ; copied from datomic-common
   "Returns true if the ID in the given ident uses UUIDs for ids."

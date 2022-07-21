@@ -57,7 +57,6 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "save-form!"
-  ;; FIXME Add tests for more variants (2 new, 1 referring to 2.; 1 new + adding ref to it to existing; update singular & multi-val props)
   (let [existing-addr-ident [::address/id (ids/new-uuid 1)]
         _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data existing-addr-ident)
                                     [:db/add [:id existing-addr-ident] ::address/street "A St"]))
@@ -169,7 +168,25 @@
 ;;; delete
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-;; FIXME impl test for delete!
+(specification "delete!"
+  (let [addr-id (ids/new-uuid 101)
+        addr-ident [::address/id addr-id]
+        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data addr-ident)
+                                    [:db/add [:id addr-ident] ::address/street "X St"]))
+        _ (asami-pathom/delete-entity! *env* {::address/id addr-id})
+        db (d/db *conn*)]
+    (assertions
+      "Entity exists no more"
+      (query/entity-query
+        {::asami/id-attribute {::attr/qualified-key ::address/id}}
+        {::address/id addr-id}
+        db) => nil
+      "The address exists no more"
+      (d/q '[:find ?e :where [?e ::address/street "X St"]] db) => '()
+      "The PK exists no more"
+      (d/q '[:find ?e :where [?e ::address/id addr-id]] db) => '()
+      "The :id exists no more"
+      (d/q [:find '?e :where ['?e :id [::address/id addr-id]]] db) => '())))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Round-trip tests
@@ -202,22 +219,36 @@
                                 "Returns the newly-created attributes"
                                 entity => {::person/id        real-id
                                            ::person/full-name "Bob"})))
+                 (component "Lookup"
+                            (assertions
+                              "Looking up something that does not exist"
+                              (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
+                              => {[::address/id "no such id"] {::address/id "no such id"}})) ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors
                  (component "Saving new items (generated ID)"
                             (let [temp-address-id (tempid/tempid)
-                                  delta           {[::address/id temp-address-id] {::address/id     {:after temp-address-id}
-                                                                                   ::address/street {:after "A St"}}}
-                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id        temp-address-id
+                                  delta {[::address/id temp-address-id] {::address/id {:after temp-address-id}
+                                                                         ::address/street {:after "A St"}}}
+                                  {::form/syms [save-form]} (parser {} `[{(form/save-form ~{::form/id temp-address-id
                                                                                             ::form/master-pk ::address/id
-                                                                                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}])
+                                                                                            ::form/delta delta}) [:tempids ::address/id ::address/street]}])
                                   {:keys [tempids]} save-form
-                                  real-id         (get tempids temp-address-id)
-                                  entity          (dissoc save-form :tempids)]
+                                  real-id (get tempids temp-address-id)
+                                  entity (dissoc save-form :tempids)]
                               (assertions
                                 "Includes the remapped (UUID) ID for id attribute"
                                 (uuid? real-id) => true
                                 "Returns the newly-created attributes"
-                                entity => {::address/id     real-id
-                                           ::address/street "A St"})))
+                                entity => {::address/id real-id
+                                           ::address/street "A St"})
+
+                              (component "Deleting a saved item"
+                                         (assertions
+                                           "The deletion succeeds"
+                                           (parser {} `[{(form/delete-entity ~{::address/id real-id}) [:com.wsscode.pathom.core/errors]}])
+                                           => {`form/delete-entity {}}
+                                           "The entity is deleted" ; i.e. Pathom returns just the ident as-is
+                                           (parser {} [{[::address/id real-id] [::address/id ::address/street]}])
+                                           => {[::address/id real-id] {::address/id real-id}}))))
                  (component "Saving a tree"
                             (let [temp-person-id  (tempid/tempid)
                                   temp-address-id (tempid/tempid)
@@ -252,8 +283,9 @@
                                   [(attr/pathom-plugin all-attributes)
                                    (asami-pathom/pathom-plugin (fn [_env] {:production repl-conn}))]
                                   [(asami-pathom/generate-resolvers all-attributes :production)])]
-    ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [{::person/primary-address [::address/id ::address/street]}]}])
+    ;(_parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [{::person/primary-address [::address/id ::address/street]}]}])
     ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [::person/primary-address]}])
+    (_parser {} [[:no-such-thing :ident] :com.wsscode.pathom.core/errors :com.wsscode.pathom.connect/errors])
     )
 
   )

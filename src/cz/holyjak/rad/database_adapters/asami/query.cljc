@@ -1,7 +1,6 @@
 (ns cz.holyjak.rad.database-adapters.asami.query
   (:require
-    #?(:cljs [cz.holyjak.rad.database-adapters.asami.tmp-update-vals :refer [update-vals]])
-    [com.fulcrologic.guardrails.core :refer [>defn => ?]]
+    [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami :as-alias asami]
     [edn-query-language.core :as eql]
@@ -20,7 +19,7 @@
 (>defn pathom-query->asami-query
   ;; TODO: Support custom where conditions or at least finding the target entity (as in [:user/email "me@.."])!
   "EQL -> [query attr-filter], to be run like `(d/q query db attr-filter)`"
-  [all-attributes pathom-query]
+  [_all-attributes pathom-query]
   [::attr/attributes ::eql/query => ::eql/query]
   ;; EACH LEVEL:
   ;;  1. content = keywords and ffirst of maps => add to attr filter [could also (or [?e-cnt ?attr1] ...)]
@@ -174,15 +173,20 @@
     ids))
 
 (comment
-  (ids->entities *db :cz.holyjak.rad.test-schema.person/id [#uuid "ffffffff-ffff-ffff-ffff-000000000100"])
-  (d/q '[:find ?a ?v :where [?e :cz.holyjak.rad.test-schema.person/id] [?e ?a ?v]] *db))
+  ;(d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
+  ;     (first *args) [:cz.holyjak.rad.test-schema.address/id #uuid "ffffffff-ffff-ffff-ffff-000000000001"])
+  ;(-> (apply ids->entities *args) first transform-entity)
+  ;(d/q '[:find ?e ?a ?v :where [?e ?a ?v]] (first *args))
+  ;(ids->entities *db :cz.holyjak.rad.test-schema.person/id [#uuid "ffffffff-ffff-ffff-ffff-000000000100"])
+  ;(d/q '[:find ?a ?v :where [?e :cz.holyjak.rad.test-schema.person/id] [?e ?a ?v]] *db)
+  )
 
 ;; ± copied from https://github.com/fulcrologic/fulcro-rad-kvstore/blob/master/src/main/com/fulcrologic/rad/database_adapters/key_value/pathom.cljc
 (>defn entity-query
   "Query the database for an entity. Uses the `id-attribute` to get the entity's id attribute name and the `input` that
   should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`)"
   [{::asami/keys [id-attribute]
-    :as env}
+    :as _env}
    input
    db]
   [map? any? any? => any?]
@@ -202,7 +206,7 @@
         result))))
 
   (comment
-    (ids->entities cz.holyjak.rad.database-adapters.asami.core/dbm :order/id [1])
+    ;(ids->entities cz.holyjak.rad.database-adapters.asami.core/dbm :order/id [1])
     (entity-query {::asami/id-attribute {::attr/qualified-key :order/id}}
                   {:order/id 2}
                   (d/connect (asami/config->url {:asami/driver :local, :asami/database "playground3"})))
@@ -213,9 +217,9 @@
     ;  (eql/query->ast [:person/id
     ;                   {:person/addresses [:address/id :address/street]}
     ;                   {:person/things [:thing/id :thing/label]}]))
-    (seq (map *eid->ent *entry-eids))
-    (keep (fn [[eid ent]] (when (:cz.holyjak.rad.test-schema.person/id ent) eid)) *eid->ent)
-    (:identities (:cz.holyjak.rad.test-schema.person/role *key->attribute))
+    ;(seq (map *eid->ent *entry-eids))
+    ;(keep (fn [[eid ent]] (when (:cz.holyjak.rad.test-schema.person/id ent) eid)) *eid->ent)
+    ;(:identities (:cz.holyjak.rad.test-schema.person/role *key->attribute))
     (asami-result->pathom-result
       :TODO
       :TODO

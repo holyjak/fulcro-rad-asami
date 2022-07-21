@@ -1,6 +1,7 @@
 (ns cz.holyjak.rad.database-adapters.asami-basics-test
   (:require [clojure.test :refer :all]
-            [asami.core :as d]))
+            [asami.core :as d]
+            [cz.holyjak.rad.database-adapters.asami.write :as write]))
 
 (def ^:dynamic *conn* nil)
 
@@ -71,3 +72,18 @@
          (d/entity (d/db *conn*) "new2"))
       "The latter entity is also inserted correctly"))
 
+(deftest delete-id
+  @(d/transact *conn* {:tx-data [{:id "existing3"}]})
+  (let [eid (d/q '[:find ?e . :where [?e :id "existing3"]] (d/db *conn*))]
+    ;@(d/transact *conn* {:tx-data [[:db/retract [:id "existing3"] :id "existing3"]]})
+    (write/retract-entity *conn* "existing3")
+    (is (= nil (d/entity (d/db *conn*) "existing3")) "The entity is no more")
+    (is (= '() (d/q '[:find ?e ?a ?v :where [?e ?a ?v] :in $ ?e] (d/db *conn*) eid)))))
+
+(deftest delete-ident
+  @(d/transact *conn* {:tx-data [{:id [:test/id "existing-ident"]
+                                  :test/id "existing-ident"}]})
+  (let [eid (d/q '[:find ?e . :where [?e :id [:test/id "existing-ident"]]] (d/db *conn*))]
+    (write/retract-entity *conn* [:test/id "existing-ident"])
+    (is (= nil (d/entity (d/db *conn*) [:test/id "existing-ident"])) "The entity is no more")
+    (is (= '() (d/q '[:find ?e ?a ?v :where [?e ?a ?v] :in $ ?e] (d/db *conn*) eid)))))

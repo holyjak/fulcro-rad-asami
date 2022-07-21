@@ -3,7 +3,7 @@
     [asami.core :as d]
     [edn-query-language.core :as eql]
     [clojure.pprint :refer [pprint]]
-    [com.fulcrologic.guardrails.core :refer [>defn => ?]]
+    [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.rad.form :as form]
@@ -11,7 +11,7 @@
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.query :as query]
-    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ref? to-one?]]
+    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ref?]]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [com.fulcrologic.rad.authorization :as auth]
     [com.wsscode.pathom.connect :as pc]
@@ -49,21 +49,18 @@
                  connection (env->asami env schema aso/connections)]
                 (do
                   (log/info "Deleting" ident)
-                  (let [database-atom (get-in env [aso/databases schema])]
-                    @(write/retract-entity connection ident) ; we assume the entity has {:id <ident>}
+                  (let [database-atom (get-in env [aso/databases schema])
+                        {:keys [db-after]} @(write/retract-entity connection ident)] ; we assume the entity has {:id <ident>}
                     (when database-atom
-                      (reset! database-atom (d/db connection)))
+                      (reset! database-atom db-after))
                     {}))
                 (log/warn "Datomic adapter failed to delete " params)))
 
 (defn save-form!                                            ; FIXME check impl
   "Do all of the possible operations for the given form delta (save to the database involved)"
-  [env {::form/keys [delta] :as save-params}]
+  [env {::form/keys [delta] :as _save-params}]
   (let [schemas (dups/schemas-for-delta env delta)
-        result (atom {:tempids {}})
-        tx-with-ref2new (fn [[_op eid _prop value :as triplet-or-map-tx]]
-                          (or (-> eid meta ::write/new?)
-                              (-> value meta ::write/new?)))]
+        result (atom {:tempids {}})]
     (log/debug "Saving form across " schemas)
     (doseq [schema schemas
             :let [connection (env->asami env schema aso/connections)
@@ -137,7 +134,7 @@
 
 (defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
-  [all-attributes
+  [_all-attributes
    {::attr/keys [qualified-key] :keys [::attr/schema ::asami/wrap-resolve] :as id-attribute}
    output-attributes]
   [::attr/attributes ::attr/attribute ::attr/attributes => ::pc/resolver]
@@ -154,8 +151,8 @@
      ::pc/output outputs
      ::pc/batch? true
      ::pc/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                            (log/debug "In resolver:" qualified-key "inputs:" (vec input))
                             (let [db (env->asami env schema aso/databases)]
+                              (log/debug "In resolver:" qualified-key "inputs:" (vec input) "db ver:" (d/as-of-t db))
                               (->> (query/entity-query
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input
@@ -165,7 +162,7 @@
                                        (assoc m k (cond->> v
                                                            (ref? env k)
                                                            (util/update-attr-val env k asami-ref->pathom))))
-                                     {})
+                                     nil)
                                    (auth/redact env))))
                           wrap-resolve (wrap-resolve)
                           :always (with-resolve-sym))}))
