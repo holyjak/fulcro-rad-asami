@@ -53,6 +53,45 @@
 (use-fixtures :each with-env)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+;;; Auto-generated resolvers
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+(specification "Auto-generated resolvers" :focus
+  (let [ ;save-middleware (asami-pathom/wrap-save)
+        ;delete-middleware (asami-pathom/wrap-delete)
+        automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
+        parser (pathom/new-parser {}
+                                  [(attr/pathom-plugin all-attributes)
+                                   ;(form/pathom-plugin save-middleware delete-middleware)
+                                   (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
+                                  [automatic-resolvers form/resolvers])
+        p1   [::person/id "bob"]
+        a1   [::address/id "osl"]
+        txn (concat (write/new-entity-ident->tx-data p1)
+                    (write/new-entity-ident->tx-data a1)
+                    [[:db/add [:id p1] ::person/full-name "Bob"]
+                     [:db/add [:id p1] ::person/nicks "Bobby"]
+                     [:db/add [:id p1] ::person/primary-address [:id a1]]
+                     [:db/add [:id p1] ::person/addresses [:id a1]]
+                     [:db/add [:id a1] ::address/street "Oslo St."]])]
+    @(d/transact *conn* txn)
+    (assertions
+      "Looking up something that does not exist"
+      (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
+      ;; NOTE: No error returned due to RAD plugins; w/o the we would get also
+      ;; {[..] {::address/street ::p/not-found}, ::p/errors ::p/not-found}
+      => {[::address/id "no such id"] {::address/id "no such id"}}  ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors)
+      "An existing entity is returned with the requested referred entity's details (w/ correct singular & multi-valued props)"
+      (parser {} [{[::person/id "bob"] [::person/id ::person/nicks ::person/full-name
+                                        {::person/addresses [::address/street]}
+                                        {::person/primary-address [::address/street]}]} :com.wsscode.pathom.core/errors])
+      => {[::person/id "bob"] {::person/id "bob"
+                               ::person/nicks ["Bobby"],
+                               ::person/full-name "Bob",
+                               ::person/addresses [{::address/street "Oslo St."}]
+                               ::person/primary-address {::address/street "Oslo St."}}})))
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Save Form Integration
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
@@ -74,7 +113,7 @@
                      {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
                      real-id (get tempids tempid1)
                      person (query/entity-query
-                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id real-id}
                               (d/db *conn*))]
                  (assertions
@@ -103,7 +142,7 @@
                                                     ::address/street {:after "B St"}}}
                      {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
                      person (query/entity-query
-                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id (get tempids tempid2)}
                               (d/db *conn*))]
                  (assertions
@@ -120,8 +159,8 @@
                                       #_#_::person/primary-address {:id existing-addr-ident}})
                    "Sets the ref to primary address (and entity-query returns just the Asami ref)"
                    (::person/primary-address person) => {:id [::address/id id3]}
-                   "Sets refs to addresses (and returns them as Asami refs) - *as a set*"
-                   (::person/addresses person) => #{{:id existing-addr-ident} {:id [::address/id id3]}})))
+                   "Sets refs to addresses (and returns them as Asami refs)"
+                   (::person/addresses person) => [{:id existing-addr-ident} {:id [::address/id id3]}])))
     (component "Update props and refs in entity (both to new & existing)"
                (let [id4 (ids/new-uuid 400), tempid4 (tempid/tempid id4)
                      delta {[::person/id id2] {::person/id id2
@@ -135,7 +174,7 @@
                                                     ::address/street {:after "C St"}}}
                      _ (asami-pathom/save-form! *env* {::form/delta delta})
                      person (query/entity-query
-                              {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                              {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id id2}
                               (d/db *conn*))]
                  (assertions
@@ -145,14 +184,14 @@
                                       ::person/full-name "June"
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/admin
                                       ::person/primary-address {:id existing-addr-ident}
-                                      ::person/addresses #{{:id existing-addr-ident} {:id [::address/id id4]}}}))))))
+                                      ::person/addresses [{:id existing-addr-ident} {:id [::address/id id4]}]}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "save-form! tempid remapping"
-               (let [tempid1 (tempid/tempid (ids/new-uuid 101)) ; FIXME Must be unique in DB
+               (let [tempid1 (tempid/tempid (ids/new-uuid 101)) ; NOTE These IDs must be unique in DB across tests, it seems
                      tempid2 (tempid/tempid (ids/new-uuid 102))
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
@@ -165,7 +204,7 @@
                    (uuid? (get tempids tempid2)) => true)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-;;; delete
+;;; delete!
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "delete!"
@@ -178,7 +217,7 @@
     (assertions
       "Entity exists no more"
       (query/entity-query
-        {::asami/id-attribute {::attr/qualified-key ::address/id}}
+        {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::address/id}}
         {::address/id addr-id}
         db) => nil
       "The address exists no more"
@@ -219,11 +258,6 @@
                                 "Returns the newly-created attributes"
                                 entity => {::person/id        real-id
                                            ::person/full-name "Bob"})))
-                 (component "Lookup"
-                            (assertions
-                              "Looking up something that does not exist"
-                              (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
-                              => {[::address/id "no such id"] {::address/id "no such id"}})) ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors
                  (component "Saving new items (generated ID)"
                             (let [temp-address-id (tempid/tempid)
                                   delta {[::address/id temp-address-id] {::address/id {:after temp-address-id}

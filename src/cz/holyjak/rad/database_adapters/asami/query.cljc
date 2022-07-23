@@ -3,6 +3,7 @@
     [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami :as-alias asami]
+    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [to-many? ref?]]
     [edn-query-language.core :as eql]
     [taoensso.timbre :as log]
     [com.fulcrologic.rad.attributes-options :as ao]
@@ -138,28 +139,33 @@
                        :else (throw (ex-info "Only unwrapping of tempid/uuid is supported" {:id suggested-id})))
       :otherwise (throw (ex-info "Cannot generate an ID for non-uuid ID attribute" {:attribute k})))))
 
-;; ± copied from https://github.com/fulcrologic/fulcro-rad-kvstore/blob/master/src/main/com/fulcrologic/rad/database_adapters/key_value/pathom.cljc
-(defn idents->value
-  "reference is an ident or a vector of idents, or a scalar (in which case not a reference). Does not do any database
-  reading, just changes [table id] to {table id}"
-  [reference]
-  (cond
-    (eql/ident? reference) (apply array-map reference)
-    (vector? reference) (mapv idents->value reference)
-    :else reference))
-
-;; ± copied from https://github.com/fulcrologic/fulcro-rad-kvstore/blob/master/src/main/com/fulcrologic/rad/database_adapters/key_value/pathom.cljc
 (defn transform-entity
   "Transform so all the joins are no longer idents but ident-like entity maps (so they can be resolved by Pathom, if desired)"
-  [entity]
-  (into {}
-        (map (fn [[k v]]
-               (if (nil? v)
-                 (do
-                   (log/warn "nil value in database for attribute" k)
-                   [k v])
-                 [k (idents->value v)]))
-             (dissoc entity :id))))
+  [{_ ::attr/key->attribute :as env} entity]
+  {:pre [entity (::attr/key->attribute env)]}
+  (reduce-kv
+    (fn [m k v]
+      (let [v' (cond-> v
+                       (nil? v)
+                       (do (log/warn "nil value in database for attribute" k) ; TODO Not sure why this, does it ever happen? remove?
+                           v)
+
+                       ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
+                       ;; => unify to always be a set
+                       (and (to-many? env k)
+                            (not (set? v)))
+                       (hash-set)
+
+                       ;; Turn the to-many set into vector b/c Pathom does not handle sets
+                       (to-many? env k)
+                       vec
+
+                       #_#_
+                       (ref? env k)
+                       (->> (util/update-attr-val env k idents->value)))]
+        (assoc m k v')))
+    {}
+    (dissoc entity :id)))
 
 (defn- ids->entities [db qualified-key ids]
   ;; We require that each entity has `:id [:<entity>/id <id value>]` and thus use that for the look up:
@@ -185,25 +191,24 @@
 (>defn entity-query
   "Query the database for an entity. Uses the `id-attribute` to get the entity's id attribute name and the `input` that
   should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`)"
-  [{::asami/keys [id-attribute]
-    :as _env}
+  [{_ ::attr/key->attribute ::asami/keys [id-attribute] :as env}
    input
    db]
   [map? any? any? => any?]
   (let [{::attr/keys [qualified-key]} id-attribute
-        one? (not (sequential? input))]
+        batch? (sequential? input)]
     (assert id-attribute)
     (assert qualified-key)
-    (assert (or (map? input) (sequential? input)))
-    (let [ids (if one?
-                [(qualified-key input)]
-                (into [] (keep qualified-key) input))
+    (assert (or (map? input) (sequential? input))) ; 1 map or seq of maps - b/c used from a batch resolver
+    (let [ids (if batch?
+                (into [] (keep qualified-key) input)
+                [(qualified-key input)])
           #_#_ids (map #(unwrap-id env qualified-key %) ids)
           entities (ids->entities db qualified-key ids)
-          result (mapv transform-entity entities)]
-      (if one?
-        (first result)
-        result))))
+          result (mapv (partial transform-entity (select-keys env [::attr/key->attribute])) entities)]
+      (if batch?
+        result
+        (first result)))))
 
   (comment
     ;(ids->entities cz.holyjak.rad.database-adapters.asami.core/dbm :order/id [1])

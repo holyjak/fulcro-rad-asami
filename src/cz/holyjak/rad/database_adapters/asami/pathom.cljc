@@ -45,7 +45,7 @@
     (enc/if-let [pk (ffirst params)  ; params = e.g. {:order/id 1} ?
                  id (get params pk)
                  ident [pk id]
-                 {:keys [::attr/schema]} (key->attribute pk)
+                 {::attr/keys [schema]} (key->attribute pk)
                  connection (env->asami env schema aso/connections)]
                 (do
                   (log/info "Deleting" ident)
@@ -150,20 +150,24 @@
      ::pc/input #{qualified-key}
      ::pc/output outputs
      ::pc/batch? true
-     ::pc/resolve (cond-> (fn [{::attr/keys [key->attribute] :as env} input]
-                            (let [db (env->asami env schema aso/databases)]
-                              (log/debug "In resolver:" qualified-key "inputs:" (vec input) "db ver:" (d/as-of-t db))
+     ::pc/resolve (cond-> (fn [{_ ::attr/key->attribute :as env} input]
+                            (let [batch? (sequential? input)
+                                  db (env->asami env schema aso/databases)]
+                              (log/debug "In resolver:" qualified-key "inputs:" (cond-> input (instance? clojure.lang.LazySeq input) vec) "db ver:" (d/as-of-t db))
                               (->> (query/entity-query
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input
                                      db)
-                                   (reduce-kv
-                                     (fn [m k v]
-                                       (assoc m k (cond->> v
-                                                           (ref? env k)
-                                                           (util/update-attr-val env k asami-ref->pathom))))
-                                     nil)
-                                   (auth/redact env))))
+                                   (util/apply-to-many-or-one
+                                     batch?
+                                     (partial
+                                       reduce-kv
+                                       (fn [m k v]
+                                         (assoc m k (cond->> v
+                                                             (ref? env k)
+                                                             (util/update-attr-val env k asami-ref->pathom))))
+                                       nil))
+                                   (util/apply-to-many-or-one batch? #(auth/redact env %)))))
                           wrap-resolve (wrap-resolve)
                           :always (with-resolve-sym))}))
 

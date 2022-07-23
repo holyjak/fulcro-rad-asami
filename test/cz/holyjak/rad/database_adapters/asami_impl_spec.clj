@@ -351,11 +351,11 @@
       (set txn) =fn=> #(some #{[:db/add [:id [::address/id new-address-id1]] :id [::address/id new-address-id1]]} %)
       (runnable? txn) => true)))
 
-(specification "entity-query" :focus
+(specification "entity-query"
   (component "simple props, singular and multi-valued"
-    (let [person-id (ids/new-uuid 1)
+    (let [person-id (ids/new-uuid 10)
           person-tempid (tempid/tempid person-id)
-          address-id (ids/new-uuid 2)
+          address-id (ids/new-uuid 11)
           address-tempid (tempid/tempid address-id)
           delta {[::person/id person-tempid] {::person/id person-tempid
                                               ::person/nicks {:after ["Bobby"]}
@@ -366,7 +366,8 @@
           {:keys [txn]} (write/delta->txn *env* :production delta)
           _ @(d/transact *conn* txn)
           person (query/entity-query
-                   {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                   {::attr/key->attribute key->attribute
+                    ::asami/id-attribute {::attr/qualified-key ::person/id}}
                    {::person/id person-id} (d/db *conn*))]
       (assertions
         "Singular attributes are returned"
@@ -374,6 +375,6 @@
         (::person/id person) => person-id
         "Singular ref is returned as an Asami lookup ref (ie. {:id ...})"
         (::person/primary-address person) => {:id [::address/id address-id]}
-        "Multi-valued attributes are returned as sets of the values"
-        (::person/nicks person) => #{"Bobby"}
+        "Multi-valued attributes are returned as vectors of the values"
+        (::person/nicks person) => ["Bobby"]
         (::person/addresses person) => [{:id [::address/id address-id]}]))))
