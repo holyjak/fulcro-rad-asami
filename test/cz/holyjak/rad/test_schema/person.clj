@@ -55,7 +55,12 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
-(def attributes [id full-name email primary-address addresses role permissions things account-balance])
+(defattr nicks ::nicks :string
+  {::attr/cardinality :many
+   ::attr/schema      :production
+   ::attr/identities  #{::id}})
+
+(def attributes [id full-name email nicks primary-address addresses role permissions things account-balance])
 
 (comment
   (defn entries->map
