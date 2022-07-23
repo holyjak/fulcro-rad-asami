@@ -21,7 +21,7 @@
   ;; TODO: Support custom where conditions or at least finding the target entity (as in [:user/email "me@.."])!
   "EQL -> [query attr-filter], to be run like `(d/q query db attr-filter)`"
   [_all-attributes pathom-query]
-  [::attr/attributes ::eql/query => ::eql/query]
+  [::attr/attributes ::eql/query => vector?]
   ;; EACH LEVEL:
   ;;  1. content = keywords and ffirst of maps => add to attr filter [could also (or [?e-cnt ?attr1] ...)]
   ;;  2. joins - add `[?e <join attr>]` and `[_ <join attr> ?e]` to entity filter

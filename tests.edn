@@ -1,0 +1,6 @@
+{:kaocha/tests [{:kaocha.testable/type :kaocha.type/clojure.test
+                 :kaocha.testable/id   :all
+                 :kaocha/ns-patterns ["-(spec|test)$"]
+                 :kaocha/source-paths ["src"]
+                 :kaocha/test-paths ["test"]}]
+ :kaocha/reporter [kaocha.report/documentation]}

@@ -20,5 +20,6 @@
                                   ;; opts to support clj-async-profiler:
                                   "-Djdk.attach.allowAttachSelf" "-XX:+UnlockDiagnosticVMOptions" "-XX:+DebugNonSafepoints"]
                        :extra-deps  {fulcrologic/fulcro-spec {:mvn/version "3.1.11"}}}
-           :run-tests {:main-opts  ["-m" "kaocha.runner"]
-                       :extra-deps {lambdaisland/kaocha {:mvn/version "1.0.732"}}}}}
+           :run-tests {:jvm-opts ["-Dguardrails.enabled" "-Dtaoensso.timbre.min-level.edn=:error"]
+                       :main-opts  ["-m" "kaocha.runner"]
+                       :extra-deps {lambdaisland/kaocha {:mvn/version "1.68.1059"}}}}}
