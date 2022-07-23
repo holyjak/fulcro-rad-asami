@@ -14,7 +14,8 @@
     [cz.holyjak.rad.test-schema.person :as person]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [asami.core :as d]
-    [fulcro-spec.core :refer [specification assertions =fn=> =>]]))
+    [fulcro-spec.core :refer [specification assertions component =fn=> =>]]
+    [cz.holyjak.rad.database-adapters.asami.query :as query]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -323,29 +324,56 @@
       "Valid Asami tx"
       (runnable? txn) => true)))
 
-(specification "Existing entity, replace to-many children" :focus
-               (let [person-id (ids/new-uuid 1)
-                     person-ident [::person/id person-id]
-                     orig-address-id1 (ids/new-uuid 1)
-                     _ @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
-                                                         (write/new-entity-ident->tx-data [::address/id orig-address-id1]))
-                                                 [:db/add [:id person-ident] ::person/full-name "Bob"]
-                                                 [:db/add [:id [::address/id orig-address-id1]] ::address/street "A St"]))
-                     new-address-id1 (ids/new-uuid 100)
-                     new-address-tempid1 (tempid/tempid new-address-id1)
-                     delta {person-ident {::person/id person-id
-                                          ::person/addresses {:before [[::address/id (ids/new-uuid 1)]]
-                                                              :after [[::address/id new-address-tempid1]]}}
-                            [::address/id new-address-tempid1] {::address/id new-address-tempid1
-                                                                ::address/street {:after "B St"}}}
-                     {:keys [tempid->generated-id txn]} (write/delta->txn *env* :production delta)]
-                 (assertions
-                   "Includes remappings for new entities"
-                   tempid->generated-id => {new-address-tempid1 new-address-id1}
-                   "Retracts the old address ref"
-                   (set txn) =fn=> #(some #{[:db/retract [:id person-ident] ::person/addresses [:id [::address/id orig-address-id1]]]} %)
-                   "Adds the new address ref"
-                   (set txn) =fn=> #(some #{[:db/add [:id person-ident] ::person/addresses [:id [::address/id new-address-id1]]]} %)
-                   "Adds the new address"
-                   (set txn) =fn=> #(some #{[:db/add [:id [::address/id new-address-id1]] :id [::address/id new-address-id1]]} %)
-                   (runnable? txn) => true)))
+(specification "Existing entity, replace to-many children"
+  (let [person-id (ids/new-uuid 1)
+        person-ident [::person/id person-id]
+        orig-address-id1 (ids/new-uuid 1)
+        _ @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
+                                            (write/new-entity-ident->tx-data [::address/id orig-address-id1]))
+                                    [:db/add [:id person-ident] ::person/full-name "Bob"]
+                                    [:db/add [:id [::address/id orig-address-id1]] ::address/street "A St"]))
+        new-address-id1 (ids/new-uuid 100)
+        new-address-tempid1 (tempid/tempid new-address-id1)
+        delta {person-ident {::person/id person-id
+                             ::person/addresses {:before [[::address/id (ids/new-uuid 1)]]
+                                                 :after [[::address/id new-address-tempid1]]}}
+               [::address/id new-address-tempid1] {::address/id new-address-tempid1
+                                                   ::address/street {:after "B St"}}}
+        {:keys [tempid->generated-id txn]} (write/delta->txn *env* :production delta)]
+    (assertions
+      "Includes remappings for new entities"
+      tempid->generated-id => {new-address-tempid1 new-address-id1}
+      "Retracts the old address ref"
+      (set txn) =fn=> #(some #{[:db/retract [:id person-ident] ::person/addresses [:id [::address/id orig-address-id1]]]} %)
+      "Adds the new address ref"
+      (set txn) =fn=> #(some #{[:db/add [:id person-ident] ::person/addresses [:id [::address/id new-address-id1]]]} %)
+      "Adds the new address"
+      (set txn) =fn=> #(some #{[:db/add [:id [::address/id new-address-id1]] :id [::address/id new-address-id1]]} %)
+      (runnable? txn) => true)))
+
+(specification "entity-query" :focus
+  (component "simple props, singular and multi-valued"
+    (let [person-id (ids/new-uuid 1)
+          person-tempid (tempid/tempid person-id)
+          address-id (ids/new-uuid 2)
+          address-tempid (tempid/tempid address-id)
+          delta {[::person/id person-tempid] {::person/id person-tempid
+                                              ::person/nicks {:after ["Bobby"]}
+                                              ::person/primary-address {:after [::address/id address-tempid]}
+                                              ::person/addresses {:after [[::address/id address-tempid]]}}
+                 [::address/id address-tempid] {::address/id address-tempid
+                                                ::address/street {:after "B St"}}}
+          {:keys [txn]} (write/delta->txn *env* :production delta)
+          _ @(d/transact *conn* txn)
+          person (query/entity-query
+                   {::asami/id-attribute {::attr/qualified-key ::person/id}}
+                   {::person/id person-id} (d/db *conn*))]
+      (assertions
+        "Singular attributes are returned"
+        (not-empty person) =fn=> map?
+        (::person/id person) => person-id
+        "Singular ref is returned as an Asami lookup ref (ie. {:id ...})"
+        (::person/primary-address person) => {:id [::address/id address-id]}
+        "Multi-valued attributes are returned as sets of the values"
+        (::person/nicks person) => #{"Bobby"}
+        (::person/addresses person) => [{:id [::address/id address-id]}]))))
