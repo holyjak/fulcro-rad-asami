@@ -1,4 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami.pathom
+  "Pathom integration for Asami"
   (:require
     [asami.core :as d]
     [edn-query-language.core :as eql]
@@ -9,8 +10,8 @@
     [com.fulcrologic.rad.form :as form]
     [cz.holyjak.rad.database-adapters.asami :as-alias asami]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
-    [cz.holyjak.rad.database-adapters.asami.query :as query]
+    [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
+    [cz.holyjak.rad.database-adapters.asami.read :as query]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ref?]]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [com.fulcrologic.rad.authorization :as auth]
@@ -51,16 +52,15 @@
                   (log/info "Deleting" ident)
                   (let [database-atom (get-in env [aso/databases schema])
                         {:keys [db-after]} @(write/retract-entity connection ident)] ; we assume the entity has {:id <ident>}
-                    (when database-atom
-                      (reset! database-atom db-after))
-                    {}))
+                    (some-> database-atom (reset! db-after))
+                    {})) ; I guess we return {} instead of nil to make Pathom understand it succeeded (=> no "not found")
                 (log/warn "Datomic adapter failed to delete " params)))
 
-(defn save-form!                                            ; FIXME check impl
+(defn save-form!
   "Do all of the possible operations for the given form delta (save to the database involved)"
   [env {::form/keys [delta] :as _save-params}]
   (let [schemas (dups/schemas-for-delta env delta)
-        result (atom {:tempids {}})]
+        result (volatile! {:tempids {}})]
     (log/debug "Saving form across " schemas)
     (doseq [schema schemas
             :let [connection (env->asami env schema aso/connections)
@@ -72,13 +72,10 @@
       (if (and connection (seq txn))
         (try
           (log/debug "Running txn\n" (with-out-str (pprint txn)))
-          (let [database-atom (get-in env [aso/databases schema])
-                ;; Mapping from Asami tempid (e.g. -1) to the assigned :db/id (e.g. #a/n [33])
-                #_#_{txid->db-id :tempids} @(d/transact connection txn')]
+          (let [database-atom (get-in env [aso/databases schema])]
             @(d/transact connection txn)
-            (when database-atom
-              (reset! database-atom (d/db connection)))
-            (swap! result update :tempids merge tempid->generated-id))
+            (some-> database-atom (reset! (d/db connection)))
+            (vswap! result update :tempids merge tempid->generated-id))
           (catch #?(:clj Exception :cljs :default) e
             (log/error e "Transaction failed!")
             {}))
@@ -99,8 +96,7 @@
   "Form save middleware to accomplish saves."
   ([]
    (fn [{::form/keys [params] :as pathom-env}]
-     (let [save-result (save-form! pathom-env params)]
-       save-result)))
+     (save-form! pathom-env params)))
   ([handler]
    (fn [{::form/keys [params] :as pathom-env}]
      (let [save-result    (save-form! pathom-env params)
@@ -109,14 +105,14 @@
 
 (defn wrap-delete
   "Form delete middleware to accomplish deletes."
-  ([handler]
-   (fn [{::form/keys [params] :as pathom-env}]
-     (let [local-result   (delete-entity! pathom-env params)
-           handler-result (handler pathom-env)]
-       (deep-merge handler-result local-result))))
   ([]
    (fn [{::form/keys [params] :as pathom-env}]
-     (delete-entity! pathom-env params))))
+     (delete-entity! pathom-env params)))
+  ([handler]
+   (fn [{::form/keys [params] :as pathom-env}]
+     (let [delete-result   (delete-entity! pathom-env params)
+           handler-result (handler pathom-env)]
+       (deep-merge handler-result delete-result)))))
 
 (defn asami-ref->pathom
   "Translate Asami ref like `{:id val}` where val is for us always an ident into
@@ -154,20 +150,20 @@
                             (let [batch? (sequential? input)
                                   db (env->asami env schema aso/databases)]
                               (log/debug "In resolver:" qualified-key "inputs:" (cond-> input (instance? clojure.lang.LazySeq input) vec) "db ver:" (d/as-of-t db))
-                              (->> (query/entity-query
+                              (->> (query/entities
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input
                                      db)
-                                   (util/apply-to-many-or-one
+                                   (util/map-over-many-or-one
                                      batch?
                                      (partial
                                        reduce-kv
                                        (fn [m k v]
                                          (assoc m k (cond->> v
                                                              (ref? env k)
-                                                             (util/update-attr-val env k asami-ref->pathom))))
+                                                             (util/map-attr-val env k asami-ref->pathom))))
                                        nil))
-                                   (util/apply-to-many-or-one batch? #(auth/redact env %)))))
+                                   (util/map-over-many-or-one batch? #(auth/redact env %)))))
                           wrap-resolve (wrap-resolve)
                           :always (with-resolve-sym))}))
 
@@ -199,7 +195,7 @@
 (comment
   (def *env (mock-resolver-env :production (d/connect (asami-core/config->url {:asami/driver :local, :asami/database "playground3"}))))
 
-  (query/entity-query
+  (query/entities
     (assoc *env ::asami/id-attribute {::attr/qualified-key :order/id})
     {:order/id 1}
     (env->asami *env))

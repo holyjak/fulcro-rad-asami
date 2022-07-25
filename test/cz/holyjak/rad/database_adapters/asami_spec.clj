@@ -7,7 +7,7 @@
     [com.fulcrologic.rad.form :as form]
     [com.fulcrologic.rad.pathom :as pathom]
     [cz.holyjak.rad.database-adapters.asami :as asami]
-    [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
+    [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.pathom :as asami-pathom]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
@@ -18,7 +18,7 @@
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component => =check=> =fn=>]]
     [fulcro-spec.check :as _]
-    [cz.holyjak.rad.database-adapters.asami.query :as query]))
+    [cz.holyjak.rad.database-adapters.asami.read :as query]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -112,7 +112,7 @@
                                                  ::address/street {:before "A St" :after "A1 St"}}}
                      {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
                      real-id (get tempids tempid1)
-                     person (query/entity-query
+                     person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id real-id}
                               (d/db *conn*))]
@@ -141,7 +141,7 @@
                             [::address/id tempid3] {::address/id tempid3
                                                     ::address/street {:after "B St"}}}
                      {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
-                     person (query/entity-query
+                     person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id (get tempids tempid2)}
                               (d/db *conn*))]
@@ -173,7 +173,7 @@
                             [::address/id tempid4] {::address/id tempid4
                                                     ::address/street {:after "C St"}}}
                      _ (asami-pathom/save-form! *env* {::form/delta delta})
-                     person (query/entity-query
+                     person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id id2}
                               (d/db *conn*))]
@@ -216,7 +216,7 @@
         db (d/db *conn*)]
     (assertions
       "Entity exists no more"
-      (query/entity-query
+      (query/entities
         {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::address/id}}
         {::address/id addr-id}
         db) => nil

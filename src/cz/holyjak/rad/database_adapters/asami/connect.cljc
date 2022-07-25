@@ -1,4 +1,4 @@
-(ns cz.holyjak.rad.database-adapters.asami.core
+(ns cz.holyjak.rad.database-adapters.asami.connect
   (:require
     [asami.core :as d]
     [asami.graph :as graph]
@@ -24,13 +24,10 @@
    }
    ```"
   ([config]
-   ;; FIXME Create db if not exists, as datomic plugin does
-   (reduce-kv
-     (fn [m k v]
-       (log/info "Starting database " k)
-       (assoc m k (d/connect (config->url v))))
-     {}
-     (aso/databases config))))
+   (update-vals
+     (aso/databases config)
+     #(do (log/info "Starting database " %)
+          (d/connect (config->url %))))))
 
 (comment
   ;(set! *data-readers* graph/node-reader)
@@ -80,7 +77,6 @@
   ;; Q: use :db/ident or :db/id ??? What's the diff?
   (def tx1 (d/transact dbm {:tx-data [{:id [:test/id 2] :b false, :i 1 :f 1.0}]}))
   (:tempids @tx1)
-  (require '[asami.graph :as graph])
   (def tx2 (d/transact dbm {:tx-data [{:id [:order/id 1]
                                        :order/descr "Order XYZ"
                                        :order/product {:id [:product/id 11]
@@ -124,7 +120,7 @@
        [:order/descr :product/name])
 
   ;; retract
-  (retract-entity dbm [:test/id 2])
+  ;(retract-entity dbm [:test/id 2])
 
   (d/entity (d/db dbm) (graph/new-node 2))
   (d/q '[:find ?e ?v . :where [?e :db/ident ?v]] dbm)

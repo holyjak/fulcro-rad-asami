@@ -7,5 +7,5 @@
 
 (def databases
   "If using the Asami pathom-plugin, the resulting patohm-env will contain
-   a map from schema->database (i.e. (d/db <connection>)) at this key path."
+   a map from schema->database atom (i.e. (atom (d/db <connection>))) at this key path."
   :cz.holyjak.rad.database-adapters.asami/databases)

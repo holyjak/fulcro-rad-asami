@@ -1,0 +1,226 @@
+(ns cz.holyjak.rad.database-adapters.asami.read
+  (:require
+    [clojure.spec.alpha :as s]
+    [com.fulcrologic.guardrails.core :refer [>def >defn =>]]
+    [com.fulcrologic.rad.attributes :as attr]
+    [cz.holyjak.rad.database-adapters.asami :as-alias asami]
+    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [to-many? ref?]]
+    [edn-query-language.core :as eql]
+    [taoensso.timbre :as log]
+    ;[com.fulcrologic.rad.attributes-options :as ao]
+    ;[clojure.walk :as walk]
+    [asami.core :as d]))
+
+;; ---------------------------------------------------------------------------------------------------------
+
+(defn- transform-entity
+  "Transform so all the joins are no longer idents but ident-like entity maps (so they can be resolved by Pathom, if desired)"
+  [{_ ::attr/key->attribute :as env} entity]
+  {:pre [entity (::attr/key->attribute env)]}
+  (reduce-kv
+    (fn [m k v]
+      (let [v' (cond-> v
+                       (nil? v)
+                       (do (log/warn "nil value in database for attribute" k) ; TODO Not sure why this, does it ever happen? remove?
+                           v)
+
+                       ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
+                       ;; => unify to always be a set
+                       (and (to-many? env k)
+                            (not (set? v)))
+                       (hash-set)
+
+                       ;; Turn the to-many set into vector b/c Pathom does not handle sets
+                       (to-many? env k)
+                       vec
+
+                       #_#_
+                               (ref? env k)
+                               (->> (util/map-attr-val env k idents->value)))]
+        (assoc m k v')))
+    {}
+    (dissoc entity :id)))
+
+(defn- ids->entities [db qualified-key ids]
+  ;; We require that each entity has `:id [:<entity>/id <id value>]` and thus use that for the look up:
+  ;; (if we supported native IDs then we could also (asami.grph/new-node long-id-value) but would need the
+  ;; RAD attribute to decide
+  (sequence
+    ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
+    ;; data of the child, we would need to pass the 3rd argument (nested?) as true
+    (comp (map #(d/entity db [qualified-key %]))
+          (remove nil?))
+    ids))
+
+(comment
+  ;(d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
+  ;     (first *args) [:cz.holyjak.rad.test-schema.address/id #uuid "ffffffff-ffff-ffff-ffff-000000000001"])
+  ;(-> (apply ids->entities *args) first transform-entity)
+  ;(d/q '[:find ?e ?a ?v :where [?e ?a ?v]] (first *args))
+  ;(ids->entities *db :cz.holyjak.rad.test-schema.person/id [#uuid "ffffffff-ffff-ffff-ffff-000000000100"])
+  ;(d/q '[:find ?a ?v :where [?e :cz.holyjak.rad.test-schema.person/id] [?e ?a ?v]] *db)
+  )
+
+(>def ::id-map (s/map-of keyword? any?))
+(>def ::id-map-or-maps (s/or :one ::id-map
+                             :many (s/every ::id-map)))
+(>def ::entity-or-entities (s/or :one (s/nilable map?)
+                                 :many (s/every map?)))
+
+
+(>def ::attr/key->attribute ::attr/attribute-map)
+(>def ::asami/id-attribute (s/keys :req [::attr/qualified-key]))
+(>def ::env (s/keys :req [::attr/key->attribute
+                          ::asami/id-attribute]))
+
+(>defn entities
+  "Query the database for an entity or entities. Uses the `id-attribute` to get the entity's id attribute name and the `input` that
+  should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`)"
+  [{_ ::attr/key->attribute ::asami/keys [id-attribute] :as env}
+   input
+   db]
+  [map? ::id-map-or-maps any? => ::entity-or-entities]
+  (let [{::attr/keys [qualified-key]} id-attribute
+        batch? (sequential? input)]
+    (let [ids (if batch?
+                (into [] (keep qualified-key) input)
+                [(get input qualified-key)])
+          entities (ids->entities db qualified-key ids)
+          result (sequence (map (partial transform-entity (select-keys env [::attr/key->attribute]))) entities)]
+      (if batch?
+        result
+        (first result)))))
+
+(comment
+  ;(ids->entities cz.holyjak.rad.database-adapters.asami.core/dbm :order/id [1])
+  (entities {::asami/id-attribute {::attr/qualified-key :order/id}}
+            {:order/id 2}
+            (d/connect (cz.holyjak.rad.database-adapters.asami/config->url {:asami/driver :local, :asami/database "playground3"})))
+
+  ;(sp/select
+  ;  (sp/walker #(and (map? %) (= :join (:type %))))
+  ;  ; map with :type :join -> get :key
+  ;  (eql/query->ast [:person/id
+  ;                   {:person/addresses [:address/id :address/street]}
+  ;                   {:person/things [:thing/id :thing/label]}]))
+  ;(seq (map *eid->ent *entry-eids))
+  ;(keep (fn [[eid ent]] (when (:cz.holyjak.rad.test-schema.person/id ent) eid)) *eid->ent)
+  ;(:identities (:cz.holyjak.rad.test-schema.person/role *key->attribute))
+  )
+
+; ------------------------------------------------------------------------------------------------ EXPERIMENTAL
+
+;[incoming-query         [::person/id
+;                         {::person/addresses [::address/id ::address/street]}
+;                         {::person/things [::thing/id ::thing/label]}]
+;
+; expected-asami-query [:db/id
+;                       {::person/addresses [::address/id ::address/street]}
+;                       {::person/things [:db/id ::thing/label]}]]
+;(>defn pathom-query->asami-query
+;  ;; TODO: Support custom where conditions or at least finding the target entity (as in [:user/email "me@.."])!
+;  "EQL -> [query attr-filter], to be run like `(d/q query db attr-filter)`"
+;  [_all-attributes pathom-query]
+;  [::attr/attributes ::eql/query => vector?]
+;  ;; EACH LEVEL:
+;  ;;  1. content = keywords and ffirst of maps => add to attr filter [could also (or [?e-cnt ?attr1] ...)]
+;  ;;  2. joins - add `[?e <join attr>]` and `[_ <join attr> ?e]` to entity filter
+;  ;; THEN: Run query, group triplets by entity id into a lookup eid -> entity map, re-construct data tree wrt query
+;  (let [{:keys [attrs joins]}
+;        (->>
+;          (tree-seq (complement keyword?)
+;                    #(if (map? %) (vals %) %)
+;                    pathom-query)
+;          (filter (some-fn keyword? map?))
+;          (group-by #(if (keyword? %) :attrs :joins)))
+;
+;        join-attrs
+;        (map ffirst joins)
+;
+;        entity-filter
+;        (->> join-attrs
+;             (mapcat (fn [join-prop] [['?e join-prop] ['_ join-prop '?e]]))
+;             (cons 'or))]
+;    ;; NOTE: Paula - This does try to look for the :order/descr attributes on products and the :product/name
+;    ;; attribute on orders, but that's actually cheap, and probably cheaper than anything else.
+;    ;; An alternative (might be slower + shows limits of bindings):
+;    ;[:find ?e ?a ?v
+;    ; :where [?e ?a ?v]
+;    ; (or (and [(identity :order/descr) ?a] [?e :order/product _])
+;    ;     (and [(identity :product/name) ?a] [_ :order/product ?e]))]
+;    [{:find '[?e ?a ?v]
+;      :in '[$ [?a ...]]
+;      :where ['[?e ?a ?v] entity-filter]}
+;     (into attrs join-attrs)]))
+#_(d/q '[:find ?e ?a ?v
+         :in $ [?a ...]
+         :where [?e ?a ?v]
+         (or [?e :order/product]
+             [_ :order/product ?e])]
+       dbm
+       [:order/descr :product/name])
+;
+;(comment
+;  (pathom-query->asami-query nil [:order/descr {:order/product [:product/name]}]))
+;
+;(defn- prop->id-prop [key->attribute attr-key]
+;  (let [attr (key->attribute attr-key)]
+;    (if (ao/identity? attr)
+;      (ao/qualified-key attr)
+;      (util/ensure! (first (ao/identities attr))
+;               (str "Attribute " attr-key " lacks " ao/identities)))))
+
+; ([#a/n[4] :order/descr "Order XYZ"] [#a/n[4] :order/product #a/n[5]] [#a/n[5] :product/name "Bread"])
+;(defn asami-result->pathom-result
+;  "Triplets from a Datalog query -> data tree"
+;  [key->attribute pathom-query asami-result]
+;  (let [join? #(= :ref (::attr/type (get key->attribute %)))
+;        maybe-ensure-seq (fn [k v] (cond-> v
+;                                           (and (= :many (::attr/cardinality (get key->attribute k)))
+;                                                (not (sequential? v)))
+;                                           (vector)))
+;        first-prop (-> (eql/query->ast pathom-query) :children first :key)
+;        entry-entity-id-prop (prop->id-prop key->attribute first-prop)
+;        eid->ent (update-vals
+;                   (group-by first asami-result)
+;                   (partial reduce (fn [m [_ k v]]
+;                                     (update m k #(cond
+;                                                    (nil? %) v
+;                                                    ;; append to existing multi-valued attr.:
+;                                                    (vector? %) (conj v)
+;                                                    ;; merge existing 1 value with new:
+;                                                    :else [% v])))
+;                            {}))
+;        entry-eids (set (keep (fn [[eid ent]] (when (entry-entity-id-prop ent) eid)) eid->ent))
+;        entry-entities (map eid->ent entry-eids)
+;        resolve-reference (fn resolve-reference [val] (if (sequential? val)
+;                                                        (map resolve-reference val)
+;                                                        (get eid->ent val :N/A #_val)))
+;        result (walk/prewalk
+;                 (fn resolve-references [form]
+;                   (if-let [[k v] (and (map-entry? form)
+;                                       (join? (key form))
+;                                       form)]
+;                     #?(:clj
+;                        (clojure.lang.MapEntry/create
+;                          k
+;                          (maybe-ensure-seq k (resolve-reference v)))
+;                        :cljs
+;                        [k (maybe-ensure-seq k (resolve-reference v))])
+;                     form))
+;                 entry-entities)]
+;    (when (seq asami-result)
+;      (assert (seq entry-entities) "Could not find top-level entities in the result => bug / forgot to include <entity>/id in query?!"))
+;    (if (next result)
+;      (vec result)
+;      (first result))))
+;
+;(defn pull [{:keys [all-attributes key->attribute]} pathom-query]
+;  (->> (pathom-query->asami-query all-attributes pathom-query)
+;       (asami-result->pathom-result key->attribute pathom-query)))
+;
+;(comment
+;  (asami-result->pathom-result
+;    :TODO
+;    :TODO
+;    (list [4 :order/id 1] [4 :order/descr "Order XYZ"] [4 :order/product 5] [5 :product/name "Bread"])))

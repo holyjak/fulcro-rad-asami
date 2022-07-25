@@ -1,15 +1,14 @@
 (ns cz.holyjak.rad.database-adapters.asami
+  "Entry point into the RAD Asami adapter, collecting all the important functions at a single place."
   (:require
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [cz.holyjak.rad.database-adapters.asami.core :as core]
+    [cz.holyjak.rad.database-adapters.asami.connect :as connect]
     [cz.holyjak.rad.database-adapters.asami.pathom :as asami.pathom]
     [asami.core :as d]))
 
-(def start-connections core/start-connections)
+(def start-connections connect/start-connections)
 
 (def pathom-plugin asami.pathom/pathom-plugin)
-
-;(def wrap-env pp/wrap-env)
 
 (defn mock-resolver-env
   "Returns a mock env that has the do/connections and do/databases keys that would be present in

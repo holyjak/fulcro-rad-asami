@@ -1,24 +1,19 @@
 = Asami Database Plugin for Fulcro RAD
 
-Status: Pre-alpha, under development.
+Status: Alpha
 
 == FIXME
 
 When to call `asami.shutdown` ?
 
-== WIP
-
-* Deal with the fact that we cannot create an entity (with an `:id`) AND add a ref to it from an existing entity in a single tx
-     ** Use `{}` form for ALL attributes of new entities (w/o refs to new); split out refs to new entities and run them in a follow up tx
-
-
 === TODO
 
-1. Review and clean up code
-2. Can Asami store keywords?
+1. Can Asami store keywords?
 
 
 == Usage
+
+BEWARE: Min required version of Clojure is 1.11.0, ClojureScript 1.10.866 (inclusion of `update-vals`).
 
 ```clojure
 (ns com.example.components.parser
@@ -41,8 +36,9 @@ When to call `asami.shutdown` ?
       (res/generate-resolvers your-model/all-attributes)
       (asami/generate-resolvers your-model/all-attributes :production))))
 
-(def save-middleware (r.s.middleware/wrap-rewrite-values (asami/wrap-save)))
+(def save-middleware (r.s.middleware/wrap-rewrite-values (asami/wrap-save))) ; the wrap-rewrite-values is optional
 
+;; See examples of this in cz.holyjak.rad.database-adapters.asami-spec
 (def parser
     (pathom/new-parser {#_"your config here..."}
         [(attr/pathom-plugin all-attributes)
@@ -67,4 +63,4 @@ When to call `asami.shutdown` ?
 * No schema generation, b/c there is no schema in Asami
 * Requires Clojure 1.11 (could easily be backported...)
 * Surprising behavior
-  ** Multi-valued attributes are stored as *sets* (I plan to add `asami-options/no-set?` so you can opt out of it)
+  ** Multi-valued attributes are stored as *sets*

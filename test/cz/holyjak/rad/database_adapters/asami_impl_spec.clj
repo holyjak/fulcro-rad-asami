@@ -6,7 +6,7 @@
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami :as asami]
-    [cz.holyjak.rad.database-adapters.asami.core :as asami-core]
+    [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [com.fulcrologic.rad.ids :as ids]
@@ -15,7 +15,7 @@
     [cz.holyjak.rad.test-schema.thing :as thing]
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component =fn=> =>]]
-    [cz.holyjak.rad.database-adapters.asami.query :as query]))
+    [cz.holyjak.rad.database-adapters.asami.read :as query]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -365,7 +365,7 @@
                                                 ::address/street {:after "B St"}}}
           {:keys [txn]} (write/delta->txn *env* :production delta)
           _ @(d/transact *conn* txn)
-          person (query/entity-query
+          person (query/entities
                    {::attr/key->attribute key->attribute
                     ::asami/id-attribute {::attr/qualified-key ::person/id}}
                    {::person/id person-id} (d/db *conn*))]
