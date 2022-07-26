@@ -7,10 +7,11 @@
     [taoensso.timbre :as log]))
 
 (defn config->url [{:asami/keys [driver] :as config}]
+  (assert driver (str "The provided `config` lacks the required key `:asami/driver`. Actual keys: " (keys config)))
   (case driver
     :mem (str "asami:mem://" (:asami/database config))
     :local (str "asami:local://" (:asami/database config))
-    (throw (ex-info "Unsupported Asami driver." {:driver driver}))))
+    (throw (ex-info (str "Unsupported Asami driver " (pr-str driver)) {:driver driver}))))
 
 (defn start-connections
   "Return a map schema->connection based on the config.

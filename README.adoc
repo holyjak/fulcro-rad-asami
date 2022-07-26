@@ -1,20 +1,33 @@
 = Asami Database Plugin for Fulcro RAD
 
-Status: Alpha
+This is a plugin for Fulcro RAD that adds support for using Asami databases (both in-memory and disk-based ones) as the back-end technology.
 
-== FIXME
+== Status
+
+Alpha
+
+=== FIXME
 
 When to call `asami.shutdown` ?
 
-=== TODO
-
-1. Can Asami store keywords?
-
-
 == Usage
 
-BEWARE: Min required version of Clojure is 1.11.0, ClojureScript 1.10.866 (inclusion of `update-vals`).
+.Extra requirements
+[IMPORTANT]
+====
+Minimal required version of Clojure is 1.11.0, ClojureScript 1.10.866 (due to reliance on `update-vals`).
 
+Every entity stored in Asami must have the property `:id <ident>`. Entities created via a RAD form get this automatically.
+====
+
+.Add the dependency
+```clojure
+;; in deps.edn:
+{:deps {cz.holyjak/fulcro-rad-asami {:git/url "https://github.com/holyjak/fulcro-rad-asami"
+                                     :sha "bd1589579230142139459c523d454f1e5607abc9"}}}
+```
+
+.Usage example code
 ```clojure
 (ns com.example.components.parser
   (:require
@@ -26,6 +39,8 @@ BEWARE: Min required version of Clojure is 1.11.0, ClojureScript 1.10.866 (inclu
     [com.fulcrologic.rad.resolvers :as res]
     [cz.holyjak.rad.database-adapters.asami :as asami]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]))
+
+(def config {::asami/databases {:production {:asami/driver :local #_:mem, :asami/database "fulcro-rad-demo"}}})
 
 ;; config should contain the key ::aso/databases, see start-connections docstring
 (def asami-connections (asami/start-connections config))
@@ -47,20 +62,30 @@ BEWARE: Min required version of Clojure is 1.11.0, ClojureScript 1.10.866 (inclu
         [automatic-resolvers your-model/custom-resolvers]))
 ```
 
+See a complete usage example in https://github.com/fulcrologic/fulcro-rad-demo .
+
+== More info
+
+=== Important characteristics of Asami and the adapter
+
+Multi-valued attributes are returned as sets, i.e. order is not preserved.
+
+As of Asami 2.3.2 you cannot create an entity and _refer_ to the entity from another one in the same transaction when using the entity form of `tx-data`. If the entity and reference are both created using the quadruplets form (`[:db/add <entity> <attr> <val>`) https://github.com/quoll/asami/pull/2[then this works].
+
+=== Implementation details
+
+We assoc to each persistent entity `:id <ident>` (see link:++https://github.com/quoll/asami/wiki/4.-Transactions#identity-values++[Asami's Identity Values]) so that we can easily refer to it in statements and from other entities. This is then used as a _lookup ref_ in insert/update statements and in `:ref` attributes of other properties. (`:ref` attributes stored via a form are automatically translated into this form.) However this property is dissoc-ed when reading. (We could likely also use `:db/ident` instead though this has not been tested.)
+
+We store the full ident in the `:id` because we cannot be sure that the ID values are globally unique though we know that Fulcro would break if they were not unique for the given entity. (Actually they should be globally unique, being UUIDs, but we might want to support other kinds of IDs in the future that do not guarantee this. We could store the full ident only on such attributes - and maybe we will.)
+
 == Limitations
 
-* Not implemented
-  ** All IDs must be uuids (for the time being)
-  ** Custom attribute names - attribute qualified name must be same as what is stored in Asami
-  ** Top-level query must include the id attribute
-  ** Exactly one element of `ao/identities` (???)
-  ** Native IDs as entity IDs
-  ** Multiple databases / schemas (used for sharding)
-* Extra requirements
-  ** Each entity in Asami is expected to have both `:<entity>/id <id>`
-     (so that queries can check for entity type: `[?e :entity/id]`)
-     and `:id [:<entity>/id <id>]` (so we can look the entity up eg. in d/entity)
-* No schema generation, b/c there is no schema in Asami
-* Requires Clojure 1.11 (could easily be backported...)
-* Surprising behavior
-  ** Multi-valued attributes are stored as *sets*
+Limitations and features that are not supported:
+
+* Currently, IDs must be of the type `uuid` and new entities need this set to a https://cljdoc.org/d/com.fulcrologic/fulcro/3.5.22/api/com.fulcrologic.fulcro.algorithms.tempid#tempid[`tempid`] so that the https://github.com/holyjak/fulcro-rad-asami/blob/main/src/cz/holyjak/rad/database_adapters/asami/write.cljc#L126-L130[entity is created before] being referred to and with https://github.com/holyjak/fulcro-rad-asami/blob/main/src/cz/holyjak/rad/database_adapters/asami/write.cljc#L67[correct attributes]
+* RAD Datomic-like https://github.com/fulcrologic/fulcro-rad-datomic/blob/f2d1535c5cc333de8fbb1a4649033dffc762072e/src/main/com/fulcrologic/rad/database_adapters/datomic_options.cljc#L5[native IDs] are not supported yet
+* https://github.com/fulcrologic/fulcro-rad/blob/fulcro-rad-1.2.7/src/main/com/fulcrologic/rad/attributes_options.cljc#L20[`ao/identities`] must have exactly one element
+
+Not tested:
+
+* Multiple databases / schemas
