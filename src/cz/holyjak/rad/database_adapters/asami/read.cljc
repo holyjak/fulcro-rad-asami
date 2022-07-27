@@ -12,9 +12,22 @@
     [asami.core :as d]))
 
 ;; ---------------------------------------------------------------------------------------------------------
+(defn- asami-ref->pathom
+  "Translate Asami ref like `{:id val}` where val is for us always an ident into
+  `{<ident prop> <ident val>}`, e.g. `{::address/id #uuid '123'}`"
+  [x]
+  (cond
+    ;; If we get [:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]]
+    (and (vector? x) (= 2 (count x)) (= :id (first x)) (eql/ident? (second x)))
+    (->> x second (apply hash-map))
+    ;; If we get {:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]}
+    (and (map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x)))
+    (->> x :id (apply hash-map))
+
+    :else x))
 
 (defn- transform-entity
-  "Transform so all the joins are no longer idents but ident-like entity maps (so they can be resolved by Pathom, if desired)"
+  "Adjust raw Asami data so that it is suitable for Pathom"
   [{_ ::attr/key->attribute :as env} entity]
   {:pre [entity (::attr/key->attribute env)]}
   (reduce-kv
@@ -36,9 +49,10 @@
                        (to-many? env k)
                        vec
 
-                       #_#_
-                               (ref? env k)
-                               (->> (util/map-attr-val env k idents->value)))]
+                       ;; 1. Translate refs from Asami's {:id [<id prop> <val>]} to Pathom's {<id prop> <val>}
+                       ;; 2. For nested child entities (created using the {} form of tx-data), transform recursively
+                       (ref? env k)
+                       (->> (util/map-attr-val env k (comp (partial transform-entity env) asami-ref->pathom))))]
         (assoc m k v')))
     {}
     (dissoc entity :id)))

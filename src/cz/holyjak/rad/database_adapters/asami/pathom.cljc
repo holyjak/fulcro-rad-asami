@@ -114,20 +114,6 @@
            handler-result (handler pathom-env)]
        (deep-merge handler-result delete-result)))))
 
-(defn asami-ref->pathom
-  "Translate Asami ref like `{:id val}` where val is for us always an ident into
-  `{<ident prop> <ident val>}`, e.g. `{::address/id #uuid '123'}`"
-  [x]
-  (cond
-    ;; If we get [:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]]
-    (and (vector? x) (= 2 (count x)) (= :id (first x)) (eql/ident? (second x)))
-    (->> x second (apply hash-map))
-    ;; If we get {:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]}
-    (and (map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x)))
-    (->> x :id (apply hash-map))
-
-    :else x))
-
 (defn id-resolver
   "Generates a resolver from `id-attribute` to the `output-attributes`."
   [_all-attributes
@@ -154,15 +140,6 @@
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input
                                      db)
-                                   (util/map-over-many-or-one
-                                     batch?
-                                     (partial
-                                       reduce-kv
-                                       (fn [m k v]
-                                         (assoc m k (cond->> v
-                                                             (ref? env k)
-                                                             (util/map-attr-val env k asami-ref->pathom))))
-                                       nil))
                                    (util/map-over-many-or-one batch? #(auth/redact env %)))))
                           wrap-resolve (wrap-resolve)
                           :always (with-resolve-sym))}))

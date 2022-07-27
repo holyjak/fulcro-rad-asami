@@ -103,7 +103,23 @@
         "The dependent child entities are returned with the parent entity"
         (parser {} [{[::person/id "ann"] [{::person/addresses [::address/street]}]} :com.wsscode.pathom.core/errors])
         => {[::person/id "ann"] {::person/addresses [{::address/street "First St."}
-                                                     {::address/street "Second St."}]}}))))
+                                                     {::address/street "Second St."}]}}))
+    (component "child entities with nested references"
+      ;; Use the entity form of tx, which permits specifying nested, dependent entities:
+      (d/transact *conn* {:tx-data [{:id [::address/city-id (ids/new-uuid 1)]
+                                     ::address/city-id (ids/new-uuid 1)
+                                     ::address/city-name "Oslo"}]})
+      @(d/transact *conn* {:tx-data [{:id [::person/id "garry"]
+                                      ::person/id "garry"
+                                      ::person/addresses [{::address/id "a-one"
+                                                           ::address/street "First St."
+                                                           ::address/city [:id [::address/city-id (ids/new-uuid 1)]]}]}]})
+      (assertions
+        "The dependent child entities have their references resolved"
+        (parser {} [{[::person/id "garry"] [{::person/addresses [::address/street
+                                                                 {::address/city [::address/city-name]}]}]} :com.wsscode.pathom.core/errors])
+        => {[::person/id "garry"] {::person/addresses [{::address/street "First St."
+                                                        ::address/city {::address/city-name "Oslo"}}]}}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Save Form Integration
@@ -142,8 +158,8 @@
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/admin
                                       ;::person/primary-address {::address/street "A1 St"}
                                       #_#_::person/primary-address {:id existing-addr-ident}})
-                   "Sets the ref to primary address (and entity-query returns just the ref)"
-                   (::person/primary-address person) => {:id existing-addr-ident})))
+                   "Sets the ref to primary address (and entity-query returns it as the entity id)"
+                   (::person/primary-address person) => (apply hash-map existing-addr-ident))))
     (component "Two new entities, one referring to another"
                (let [tempid2 (tempid/tempid id2)
                      tempid3 (tempid/tempid id3)
@@ -171,10 +187,10 @@
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/user
                                       ;::person/primary-address {::address/street "A1 St"}
                                       #_#_::person/primary-address {:id existing-addr-ident}})
-                   "Sets the ref to primary address (and entity-query returns just the Asami ref)"
-                   (::person/primary-address person) => {:id [::address/id id3]}
-                   "Sets refs to addresses (and returns them as Asami refs)"
-                   (::person/addresses person) => [{:id existing-addr-ident} {:id [::address/id id3]}])))
+                   "Sets the ref to primary address (and entity-query returns the ::address/id)"
+                   (::person/primary-address person) => {::address/id id3}
+                   "Sets refs to addresses (and returns them as entity IDs)"
+                   (::person/addresses person) => [(apply hash-map existing-addr-ident) {::address/id id3}])))
     (component "Update props and refs in entity (both to new & existing)"
                (let [id4 (ids/new-uuid 400), tempid4 (tempid/tempid id4)
                      delta {[::person/id id2] {::person/id id2
@@ -197,8 +213,8 @@
                                      {::person/id id2
                                       ::person/full-name "June"
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/admin
-                                      ::person/primary-address {:id existing-addr-ident}
-                                      ::person/addresses [{:id existing-addr-ident} {:id [::address/id id4]}]}))))))
+                                      ::person/primary-address (apply hash-map existing-addr-ident)
+                                      ::person/addresses [(apply hash-map existing-addr-ident) {::address/id id4}]}))))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping

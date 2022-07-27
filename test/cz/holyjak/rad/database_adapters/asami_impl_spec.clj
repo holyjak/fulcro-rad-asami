@@ -373,8 +373,8 @@
         "Singular attributes are returned"
         (not-empty person) =fn=> map?
         (::person/id person) => person-id
-        "Singular ref is returned as an Asami lookup ref (ie. {:id ...})"
-        (::person/primary-address person) => {:id [::address/id address-id]}
+        "Singular ref is returned as Pathom id-only entity (ie. {:<entity>/id ...})"
+        (::person/primary-address person) => {::address/id address-id}
         "Multi-valued attributes are returned as vectors of the values"
         (::person/nicks person) => ["Bobby"]
-        (::person/addresses person) => [{:id [::address/id address-id]}]))))
+        (::person/addresses person) => [{::address/id address-id}]))))
