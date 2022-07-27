@@ -24,7 +24,7 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 ```clojure
 ;; in deps.edn:
 {:deps {cz.holyjak/fulcro-rad-asami {:git/url "https://github.com/holyjak/fulcro-rad-asami"
-                                     :sha "bd1589579230142139459c523d454f1e5607abc9"}}}
+                                     :sha "73810e2a2dbdd71d6fce770f431a1bd11d97cd77"}}}
 ```
 
 .Usage example code
