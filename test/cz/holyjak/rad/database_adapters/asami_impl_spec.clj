@@ -99,7 +99,7 @@
         txn => [[:db/add ref ::address/street "111 Main St"]]
         (runnable? txn) => true))))
 
-(specification "delta->txn: simple flat delta, existing entity, non-native ID. DELETE to-one ATTRIBUTE"  :focus
+(specification "delta->txn: simple flat delta, existing entity, non-native ID. DELETE to-one ATTRIBUTE"
   (let [id (ids/new-uuid 1)
         ref [:id [::address/id id]]
         _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data [::address/id id])

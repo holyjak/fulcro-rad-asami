@@ -56,40 +56,54 @@
 ;;; Auto-generated resolvers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(specification "Auto-generated resolvers" :focus
-  (let [ ;save-middleware (asami-pathom/wrap-save)
+(specification "Auto-generated resolvers"
+  (let [;save-middleware (asami-pathom/wrap-save)
         ;delete-middleware (asami-pathom/wrap-delete)
         automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
         parser (pathom/new-parser {}
                                   [(attr/pathom-plugin all-attributes)
                                    ;(form/pathom-plugin save-middleware delete-middleware)
                                    (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
-                                  [automatic-resolvers form/resolvers])
-        p1   [::person/id "bob"]
-        a1   [::address/id "osl"]
-        txn (concat (write/new-entity-ident->tx-data p1)
-                    (write/new-entity-ident->tx-data a1)
-                    [[:db/add [:id p1] ::person/full-name "Bob"]
-                     [:db/add [:id p1] ::person/nicks "Bobby"]
-                     [:db/add [:id p1] ::person/primary-address [:id a1]]
-                     [:db/add [:id p1] ::person/addresses [:id a1]]
-                     [:db/add [:id a1] ::address/street "Oslo St."]])]
-    @(d/transact *conn* txn)
-    (assertions
-      "Looking up something that does not exist"
-      (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
-      ;; NOTE: No error returned due to RAD plugins; w/o the we would get also
-      ;; {[..] {::address/street ::p/not-found}, ::p/errors ::p/not-found}
-      => {[::address/id "no such id"] {::address/id "no such id"}}  ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors)
-      "An existing entity is returned with the requested referred entity's details (w/ correct singular & multi-valued props)"
-      (parser {} [{[::person/id "bob"] [::person/id ::person/nicks ::person/full-name
-                                        {::person/addresses [::address/street]}
-                                        {::person/primary-address [::address/street]}]} :com.wsscode.pathom.core/errors])
-      => {[::person/id "bob"] {::person/id "bob"
-                               ::person/nicks ["Bobby"],
-                               ::person/full-name "Bob",
-                               ::person/addresses [{::address/street "Oslo St."}]
-                               ::person/primary-address {::address/street "Oslo St."}}})))
+                                  [automatic-resolvers form/resolvers])]
+    (component "independent entities"
+      (let [p1 [::person/id "bob"]
+            a1 [::address/id "osl"]
+            txn (concat (write/new-entity-ident->tx-data p1)
+                        (write/new-entity-ident->tx-data a1)
+                        [[:db/add [:id p1] ::person/full-name "Bob"]
+                         [:db/add [:id p1] ::person/nicks "Bobby"]
+                         [:db/add [:id p1] ::person/primary-address [:id a1]]
+                         [:db/add [:id p1] ::person/addresses [:id a1]]
+                         [:db/add [:id a1] ::address/street "Oslo St."]])]
+        @(d/transact *conn* txn)
+        (assertions
+          "Looking up something that does not exist"
+          (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
+          ;; NOTE: No error returned due to RAD plugins; w/o the we would get also
+          ;; {[..] {::address/street ::p/not-found}, ::p/errors ::p/not-found}
+          => {[::address/id "no such id"] {::address/id "no such id"}} ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors)
+          "An existing entity is returned with the requested referred entity's details (w/ correct singular & multi-valued props)"
+          (parser {} [{[::person/id "bob"] [::person/id ::person/nicks ::person/full-name
+                                            {::person/addresses [::address/street]}
+                                            {::person/primary-address [::address/street]}]} :com.wsscode.pathom.core/errors])
+          => {[::person/id "bob"] {::person/id "bob"
+                                   ::person/nicks ["Bobby"],
+                                   ::person/full-name "Bob",
+                                   ::person/addresses [{::address/street "Oslo St."}]
+                                   ::person/primary-address {::address/street "Oslo St."}}})))
+    (component "child entities"
+      ;; Use the entity form of tx, which permits specifying nested, dependent entities:
+      @(d/transact *conn* {:tx-data [{:id [::person/id "ann"]
+                                      ::person/id "ann"
+                                      ::person/addresses [{::address/id "a-one"
+                                                           ::address/street "First St."}
+                                                          {::address/id "a-two"
+                                                           ::address/street "Second St."}]}]})
+      (assertions
+        "The dependent child entities are returned with the parent entity"
+        (parser {} [{[::person/id "ann"] [{::person/addresses [::address/street]}]} :com.wsscode.pathom.core/errors])
+        => {[::person/id "ann"] {::person/addresses [{::address/street "First St."}
+                                                     {::address/street "Second St."}]}}))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Save Form Integration

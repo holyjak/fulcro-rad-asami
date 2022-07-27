@@ -27,10 +27,12 @@
                        ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
                        ;; => unify to always be a set
                        (and (to-many? env k)
-                            (not (set? v)))
-                       (hash-set)
+                            (not (set? v))
+                            (not (sequential? v)))
+                       ;; A single value (a map or a primitive) => wrap in a sequence
+                       (vector)
 
-                       ;; Turn the to-many set into vector b/c Pathom does not handle sets
+                       ;; Turn the to-many set returned by Asami for 2+ elements into vector b/c Pathom does not handle sets
                        (to-many? env k)
                        vec
 
