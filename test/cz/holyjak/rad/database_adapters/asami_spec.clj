@@ -18,7 +18,8 @@
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component => =check=> =fn=>]]
     [fulcro-spec.check :as _]
-    [cz.holyjak.rad.database-adapters.asami.read :as query]))
+    [cz.holyjak.rad.database-adapters.asami.read :as query]
+    [com.wsscode.pathom.connect :as pc]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -56,6 +57,10 @@
 ;;; Auto-generated resolvers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
+(pc/defresolver cities-resolver [{city-ids ::cities} _]
+  {:pc/output [::all-cities]}
+  {::all-cities city-ids})
+
 (specification "Auto-generated resolvers"
   (let [;save-middleware (asami-pathom/wrap-save)
         ;delete-middleware (asami-pathom/wrap-delete)
@@ -64,7 +69,7 @@
                                   [(attr/pathom-plugin all-attributes)
                                    ;(form/pathom-plugin save-middleware delete-middleware)
                                    (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
-                                  [automatic-resolvers form/resolvers])]
+                                  [automatic-resolvers form/resolvers cities-resolver])]
     (component "independent entities"
       (let [p1 [::person/id "bob"]
             a1 [::address/id "osl"]
@@ -119,7 +124,33 @@
         (parser {} [{[::person/id "garry"] [{::person/addresses [::address/street
                                                                  {::address/city [::address/city-name]}]}]} :com.wsscode.pathom.core/errors])
         => {[::person/id "garry"] {::person/addresses [{::address/street "First St."
-                                                        ::address/city {::address/city-name "Oslo"}}]}}))))
+                                                        ::address/city {::address/city-name "Oslo"}}]}}))
+    (component "multiple entities"
+      (let [id1 (ids/new-uuid 3), id2 (ids/new-uuid 4), id3 (ids/new-uuid 5)
+            cities {id1 "Oslo", id2 "Praha", id3 "Ash"}
+            cities-backwards (reverse (seq cities))
+            city (fn [[id name]] {:id [::address/city-id id] ::address/city-id id ::address/city-name name})
+            address (fn [idx city-id] {:id [::address/id (str "x" idx)]
+                                       ::address/id (str "x" idx)
+                                       ::address/city [:id [::address/city-id city-id]]})]
+        @(d/transact *conn* {:tx-data (mapv city cities)})
+        (assertions
+          "Output and input returned in the same order"
+          (parser {} (mapv (fn [[id]] {[::address/city-id id] [::address/city-name]}) cities))
+          => {[::address/city-id id1] {::address/city-name "Oslo"}
+              [::address/city-id id2] {::address/city-name "Praha"}
+              [::address/city-id id3] {::address/city-name "Ash"}}
+          "Output and input returned in the same order even if we reorder the input"
+          (parser {} (mapv (fn [[id]] {[::address/city-id id] [::address/city-name]}) cities-backwards))
+          => {[::address/city-id id3] {::address/city-name "Ash"}
+              [::address/city-id id2] {::address/city-name "Praha"}
+              [::address/city-id id1] {::address/city-name "Oslo"}}
+          "Correct order even when fetched via a list-returning resolver"
+          (parser {::cities [{::address/city-id id1} {::address/city-id id2} {::address/city-id id3}]}
+                  [{::all-cities [::address/city-id ::address/city-name]}])
+          => {::all-cities [{::address/city-id id1 ::address/city-name "Oslo"}
+                            {::address/city-id id2 ::address/city-name "Praha"}
+                            {::address/city-id id3 ::address/city-name "Ash"}]})))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; Save Form Integration

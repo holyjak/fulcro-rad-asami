@@ -8,6 +8,9 @@
    x)
   ([x msg]
    (assert x msg)
+   x)
+  ([x pred ^String msg]
+   (assert (pred x) msg)
    x))
 
 (defn to-one? [{::attr/keys [key->attribute]} k]            ; copied from datomic-common
@@ -23,13 +26,5 @@
 
 (defn map-over-many-or-one [many? f v]
   (if many?
-    (into (empty v)
-          (map f)
-          v)
+    (map f v)
     (f v)))
-
-(defn map-attr-val
-  "Apply the fn `f` to each value of the attribute `k` based on whether it is singular or multi-value"
-  [{::attr/keys [key->attribute] :as env} k f v]
-  {:pre [(get key->attribute k)]}
-  (map-over-many-or-one (to-many? k env) f v))

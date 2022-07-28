@@ -26,33 +26,39 @@
 
     :else x))
 
+
+
 (defn- transform-entity
   "Adjust raw Asami data so that it is suitable for Pathom"
   [{_ ::attr/key->attribute :as env} entity]
   {:pre [entity (::attr/key->attribute env)]}
   (reduce-kv
     (fn [m k v]
-      (let [v' (cond-> v
+      (let [to-many?? (to-many? env k)
+            v' (cond-> v
                        (nil? v)
                        (do (log/warn "nil value in database for attribute" k) ; TODO Not sure why this, does it ever happen? remove?
                            v)
 
                        ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
                        ;; => unify to always be a set
-                       (and (to-many? env k)
+                       (and to-many??
                             (not (set? v))
                             (not (sequential? v)))
                        ;; A single value (a map or a primitive) => wrap in a sequence
                        (vector)
 
                        ;; Turn the to-many set returned by Asami for 2+ elements into vector b/c Pathom does not handle sets
-                       (to-many? env k)
+                       to-many??
                        vec
 
                        ;; 1. Translate refs from Asami's {:id [<id prop> <val>]} to Pathom's {<id prop> <val>}
                        ;; 2. For nested child entities (created using the {} form of tx-data), transform recursively
-                       (ref? env k)
-                       (->> (util/map-attr-val env k (comp (partial transform-entity env) asami-ref->pathom))))]
+                       (ref? env k) ; should always be map for a ref *in theory*
+                       (-> (util/ensure! #(map? (cond-> % to-many?? first)) ; could fail due to badly inserted data
+                                         (str "The ref in the the to-" (if to-many?? "many" "one")
+                                              " attr " k " should be a map but is " (pr-str v)))
+                           (->> (util/map-over-many-or-one to-many?? (comp (partial transform-entity env) asami-ref->pathom)))))]
         (assoc m k v')))
     {}
     (dissoc entity :id)))

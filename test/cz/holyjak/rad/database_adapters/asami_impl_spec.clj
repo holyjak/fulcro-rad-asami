@@ -15,7 +15,8 @@
     [cz.holyjak.rad.test-schema.thing :as thing]
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component =fn=> =>]]
-    [cz.holyjak.rad.database-adapters.asami.read :as query]))
+    [cz.holyjak.rad.database-adapters.asami.read :as query]
+    [cz.holyjak.rad.database-adapters.asami.util :as util]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -378,3 +379,14 @@
         "Multi-valued attributes are returned as vectors of the values"
         (::person/nicks person) => ["Bobby"]
         (::person/addresses person) => [{::address/id address-id}]))))
+
+(specification "util/map-over-many-or-one"
+  (assertions
+    "Works on a single input"
+    (util/map-over-many-or-one false inc 7) => 8
+    ;"Returns same kind of collection as the input"
+    ;(util/map-over-many-or-one :many identity #{1 2 3}) => #{1 2 3}
+    "Preserves order"
+    (util/map-over-many-or-one :many inc [1 2 3]) => [2 3 4]
+    (util/map-over-many-or-one :many inc [3 2 1]) => [4 3 2]
+    (util/map-over-many-or-one :many inc '(1 2 3)) => '(2 3 4)))
