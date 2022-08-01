@@ -6,10 +6,6 @@ This is a plugin for Fulcro RAD that adds support for using Asami databases (bot
 
 Alpha
 
-=== FIXME
-
-When to call `asami.shutdown` ?
-
 == Usage
 
 .Extra requirements
@@ -63,6 +59,8 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 ```
 
 See a complete usage example in https://github.com/fulcrologic/fulcro-rad-demo .
+
+TIP: It is better to call `asami.core/shutdown` when shutting down the backend to ensure that the database files are not unnecessarily large. (They are created with more space so that data can be inserted quickly and shutdown trims them to the actual content.)
 
 == More info
 
