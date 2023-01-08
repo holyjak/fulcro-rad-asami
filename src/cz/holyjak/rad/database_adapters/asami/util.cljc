@@ -1,4 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami.util
+  "INTERNAL NS. Subject to change without warning."
   (:require
     [com.fulcrologic.rad.attributes :as attr]))
 
@@ -28,3 +29,8 @@
   (if many?
     (map f v)
     (f v)))
+
+(def q-ident->node-id
+  "Query turning an ident into Asami node id
+  Usage: `(d/q q-ident->node-id db [:person/id #uuid \"...\")`"
+  '[:find ?e . :where [?e :id ?ident] :in $ ?ident])

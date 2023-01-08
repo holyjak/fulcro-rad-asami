@@ -1,5 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami-impl-spec
-  "Low-level, implementation-dependat tests"
+  "Low-level, implementation-dependant tests"
   (:require
     [clojure.set :as set]
     [clojure.test :refer [use-fixtures]]

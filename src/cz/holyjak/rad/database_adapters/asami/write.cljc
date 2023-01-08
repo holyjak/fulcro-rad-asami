@@ -1,14 +1,32 @@
 (ns cz.holyjak.rad.database-adapters.asami.write
+  "Support for turning form deltas into Asami transactions etc."
   (:require
     [asami.core :as d]
+    [asami.graph :as graph]
     [clojure.set :as set]
     [com.fulcrologic.guardrails.core :refer [>defn => ?]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
-    [cz.holyjak.rad.database-adapters.asami.util :refer [id? ref? to-one?]]
+    [cz.holyjak.rad.database-adapters.asami.util :refer [ensure! ref? to-one?]]
     [taoensso.timbre :as log]
     [cz.holyjak.rad.database-adapters.asami.util :as util]))
+
+(defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
+  (when-let [node-id (ffirst (graph/resolve-triple graph '?n :id ident))]
+    (for [prop singular-props
+          :let [existing-val (ffirst (graph/resolve-triple graph node-id prop '?xval))]
+          :when existing-val]
+      [:db/retract node-id prop existing-val]))
+
+  )
+
+(defn clear-singular-attributes-txn
+  "Generate retractions for existing values of the given `singular-props` attributes of the given `ident` entities"
+  [db ident->singular-props]
+  (let [graph (d/graph db)]
+    (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
+         not-empty)))
 
 (defn retract-entity
   "Retract a (flat) entity from the DB, given the value of its `:id` attribute. Returns same as `d/transact`"
@@ -50,7 +68,7 @@
   (dups/tempids->generated-ids generate-id env delta))
 
 (defn asami-lookup-ref->ident
-  "The opposite of [[ident->asami-lookup-ref]]"
+  "The opposite of [[ident->asami-lookup-ref]], i.e. `[:id <ident>] -> <ident>`"
   [lookup-ref]
   {:pre [(vector? lookup-ref) (= :id (first lookup-ref))]}
   (second lookup-ref))
@@ -92,6 +110,9 @@
   [env+ eid k {:keys [before after] :as delta}] cat
   ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
   (let [singular? (to-one? env+ k)]
+    ;; We turn singular values into a set so we can handle them in the same way as to-many; Asami does insert each
+    ;; set value separately, ie. never the whole set as-is.
+    ;; FIXME We it seems cannot trust the `before` and need to fetch the current attr values or use the force-replace magic...
     (let [before (if singular? (some-> before hash-set) (set before))
           after (if singular? (some-> after hash-set) (set after))]
       (concat
