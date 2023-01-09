@@ -5,7 +5,7 @@
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure!]]
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =fn=>]]
+    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =throws=>]]
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.person :as person]
     [cz.holyjak.rad.test-schema.address :as address]
@@ -59,7 +59,23 @@
                 (d/transact *conn*)
                 deref
                 :db-after)
-        _   (tap> (d/q '[:find ?e ?a ?v :where [?e ?a ?v]] db)) ; FIXME rm
+        db-double-name (->> [[:db/add [:id [:person/id pid]] :person/full-name "Name One"]
+                             [:db/add [:id [:person/id pid]] :person/full-name "Name Two"]]
+                            (d/transact *conn*)
+                            deref
+                            :db-after)
+        pid2 (random-uuid)
+        pid3 (random-uuid)
+        db3  (->> [{:id                     [:person/id pid2]
+                    :person/email           "two@email.com"
+                    :person/role            :user
+                    :person/account-balance 300}
+                   {:id [:person/id pid3] :person/email "three@email.com"}]
+                  (d/transact *conn*)
+                  deref
+                  :db-after)
+        node-id2 (d/q util/q-ident->node-id db3 [:person/id pid2])
+        node-id3 (d/q util/q-ident->node-id db3 [:person/id pid3])
         node-id (ensure! (d/q util/q-ident->node-id db [:person/id pid]) "person should exist in the db")]
     (assertions
       "Returns no retractions for entities that do not exist"
@@ -69,8 +85,21 @@
       "Returns retraction of the current value"
       (write/clear-singular-attributes-txn db {[:person/id pid] #{:person/email}})
       => [[:db/retract node-id :person/email "before@email.com"]]
-      ; TODO fails if there are multiple values for a presumably singular attr
-      ; TODO Test with multiple props/ident and multiple idents in the input
+      "Fails if there are multiple values for a presumably singular attr"
+      (write/clear-singular-attributes-txn db-double-name {[:person/id pid] #{:person/full-name}})
+      =throws=> AssertionError
+      "Test with multiple props/ident and multiple idents in the input"
+      (->
+        (write/clear-singular-attributes-txn
+          db3
+          {[:person/id pid2] #{:person/email :person/role :person/account-balance}
+           [:person/id pid3] #{:person/email}})
+        set)
+        => #{[:db/retract node-id2 :person/email "two@email.com"]
+             [:db/retract node-id2 :person/role :user]
+             [:db/retract node-id2 :person/account-balance 300]
+             [:db/retract node-id3 :person/email "three@email.com"]}
+
       )))
 
 (comment

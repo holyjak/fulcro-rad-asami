@@ -13,16 +13,23 @@
     [cz.holyjak.rad.database-adapters.asami.util :as util]))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
-  (when-let [node-id (ffirst (graph/resolve-triple graph '?n :id ident))]
+  (if-let [node-id (ffirst (graph/resolve-triple graph '?n :id ident))]
     (for [prop singular-props
-          :let [existing-val (ffirst (graph/resolve-triple graph node-id prop '?xval))]
+          :let [existing-val (ffirst (ensure!
+                                       (graph/resolve-triple graph node-id prop '?xval)
+                                       #(-> % next count zero?)
+                                       (str "More than one existing value on " ident " " prop)))]
           :when existing-val]
-      [:db/retract node-id prop existing-val]))
+      [:db/retract node-id prop existing-val])
+    (do (log/warn "Expected to find an entity with the ident" ident "to clear its singular props but no match")
+        nil))
 
   )
 
 (defn clear-singular-attributes-txn
-  "Generate retractions for existing values of the given `singular-props` attributes of the given `ident` entities"
+  "Generate retractions for existing values of the given `singular-props` attributes of the given `ident` entities
+  NOTE: It only clears the single attribute. If it points to a dependant entity, it remains in existence.
+  Hopefully RAD handles removing those."
   [db ident->singular-props]
   (let [graph (d/graph db)]
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)

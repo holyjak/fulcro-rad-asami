@@ -63,6 +63,12 @@ See a complete usage example in https://github.com/fulcrologic/fulcro-rad-demo .
 TIP: It is better to call `asami.core/shutdown` when shutting down the backend to ensure that the database files are not unnecessarily large. Though you can likely simply rely on the JVM shutdown hook calling this, which Asami itself registers. (They are created with more space so that data can be inserted quickly and shutdown trims them to the actual content.)
 (Beware: as of Asami 2.3.2, when you call `shutdown`, it will close files but not reset the internal `connections` map and subsequent `asami/start-connections` will not re-initialize them properly. So avoid calling shutdown repeatedly during REPLing.)
 
+=== Tips
+
+==== Lookup refs
+
+When inserting data manually, remember to set `:id <ident>`. You can then use it as a lookup ref, e.g. in add: `[:db/add [:id <ident>] <prop> <val>]`.
+
 === Troubleshooting
 
 ==== Enable debug logging
