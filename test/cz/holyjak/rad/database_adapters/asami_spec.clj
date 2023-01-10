@@ -372,6 +372,10 @@
                                                                      ::address/street "A St"}})))))
 
 (comment
+  (do
+    (require 'fulcro-spec.reporters.repl)
+    (fulcro-spec.reporters.repl/run-tests))
+
   (def repl-conn (start-connection))
   (reset-db)
   (let [_parser (pathom/new-parser {}

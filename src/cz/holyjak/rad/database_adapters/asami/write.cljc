@@ -35,6 +35,32 @@
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
          not-empty)))
 
+(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as env} entity-delta]
+  (->> entity-delta
+       (filter (fn [[k v]] (and (util/to-one? env k)
+                                (map? v)
+                                (contains? v :after))))
+       (map key)
+       set
+       not-empty))
+
+(defn- assoc!-some-1 [m k v]
+  (cond-> m
+          v (assoc! k v)))
+
+(defn delta->singular-attrs-to-clear
+  "Derives from the form delta and attribute definitions which singular attributes should be cleared of current value"
+  [key->attribute delta]
+  (let [env {::attr/key->attribute key->attribute}]
+   (->> (reduce-kv (fn [m [_ id-val :as ident] entity-delta]
+                     (cond-> m
+                             (not (tempid/tempid? id-val))
+                             (assoc!-some-1 ident (entity-delta->singular-attrs env entity-delta))))
+                   (transient {})
+                   delta)
+        persistent!
+        not-empty)))
+
 (defn retract-entity
   "Retract a (flat) entity from the DB, given the value of its `:id` attribute. Returns same as `d/transact`"
   [conn id]

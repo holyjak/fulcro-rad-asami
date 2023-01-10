@@ -98,8 +98,83 @@
         => #{[:db/retract node-id2 :person/email "two@email.com"]
              [:db/retract node-id2 :person/role :user]
              [:db/retract node-id2 :person/account-balance 300]
-             [:db/retract node-id3 :person/email "three@email.com"]}
+             [:db/retract node-id3 :person/email "three@email.com"]})))
 
+(specification "delta->singular-attrs-to-clear"
+  (let [pid                 (ids/new-uuid 10)
+        tempid             (tempid/tempid)
+
+        existing-addr-ident [::address/id (ids/new-uuid 1)]
+        id1                 (ids/new-uuid 100)
+        id2                 (ids/new-uuid 200)
+        id3                 (ids/new-uuid 300)
+        id4                 (ids/new-uuid 400)
+        tempid4             (tempid/tempid id4)
+        delta               {[::person/id pid]      {::person/id              pid
+                                                     ::person/email           {:after "new@ma.il"}
+                                                     ::person/full-name       {:before "Jo" :after "June"}
+                                                     ::person/primary-address {:before [::address/id id3] :after existing-addr-ident}
+                                                     ;::person/addresses {:after [existing-addr-ident [::address/id tempid3]]}
+                                                     ::person/role            {:before :cz.holyjak.rad.test-schema.person.role/user
+                                                                               :after  :cz.holyjak.rad.test-schema.person.role/admin}}
+                             [::address/id tempid4] {::address/id     tempid4
+                                                     ::address/street {:after "C St"}}}]
+
+    (assertions
+      "ID excluded, despite being singular"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/id pid}})
+      => nil
+      "Updated singular attribute is to be cleared"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/id pid, ::person/full-name {:before "Jo" :after "June"}}})
+      => {[::person/id pid] #{::person/full-name}}
+      "Removed singular attribute is to be cleared (RAD would remove it too but let's not rely on it having latest value)"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/id pid, ::person/full-name {:before "Jo" :after nil}}})
+      => {[::person/id pid] #{::person/full-name}}
+      "New entity is ignored, no matter its singular attrs"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id tempid] {::person/id tempid, ::person/full-name {:after "June"}}})
+      => nil
+      "Newly set singular attribute on existing entity is to be cleared (for I don't want to trust Fulcro's :before 100%)"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/id tempid, ::person/email {:after "new@ma.il"}}})
+      => {[::person/id pid] #{::person/email}}
+      "Non-singular attrs are ignored"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/addresses {:before [[::address/id id1]]
+                                                :after  [[::address/id id1], [::address/id id2]]}}})
+      => nil
+      "All singular attrs are included"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid] {::person/id pid,
+                            ::person/email           {:after "new@ma.il"}
+                            ::person/full-name       {:before "Jo" :after "June"}
+                            ::person/primary-address {:before [::address/id id1] :after [::address/id id2]}
+                            ::person/role            {:before :cz.holyjak.rad.test-schema.person.role/user
+                                                      :after  :cz.holyjak.rad.test-schema.person.role/admin}}})
+      => {[::person/id pid] #{::person/email ::person/full-name ::person/primary-address ::person/role}}
+      "All updated entities are included"
+      (write/delta->singular-attrs-to-clear
+        key->attribute
+        {[::person/id pid]  {::person/id              pid,
+                             ::person/email           {:after "new@ma.il"}
+                             ::person/full-name       {:before "Jo" :after "June"}
+                             ::person/primary-address {:before [::address/id id1] :after [::address/id id2]}
+                             ::person/role            {:before :cz.holyjak.rad.test-schema.person.role/user
+                                                       :after  :cz.holyjak.rad.test-schema.person.role/admin}}
+         [::address/id id2] {::address/id     id2
+                             ::address/street {:before "Fake" :after "New Street 1"}}})
+      => {[::person/id pid] #{::person/email ::person/full-name ::person/primary-address ::person/role}
+          [::address/id id2] #{::address/street}}
       )))
 
 (comment
