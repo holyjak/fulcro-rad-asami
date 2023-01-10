@@ -202,5 +202,5 @@
   [{::attr/keys [key->attribute] :as env} db schema delta]
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
                          (clear-singular-attributes-txn db))
-        change-txn  (delta->txn env schema delta)]
-    (concat retractions change-txn)))
+        changes  (delta->txn env schema delta)]
+    (update changes :txn concat retractions)))

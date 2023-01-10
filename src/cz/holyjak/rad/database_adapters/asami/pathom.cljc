@@ -66,7 +66,7 @@
             :let [connection (env->asami env schema aso/connections)
                   ;; NOTE: tempid = Fulcro tempid;
                   ;;       generated-id = the (uu)id that we generated as the ID of the new entity
-                  {:keys [tempid->generated-id txn]} (write/delta->txn env schema delta)]]
+                  {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions env (d/db connection) schema delta)]]
 
       (log/debug "Saving form delta" (with-out-str (pprint delta)) "on schema" schema)
       (if (and connection (seq txn))
@@ -128,14 +128,14 @@
                            (fn [env input]
                              (r (assoc env ::pc/sym resolve-sym) input)))]
     (log/info "Building ID resolver for" qualified-key "outputs" outputs)
-    {::pc/sym resolve-sym
-     ::pc/input #{qualified-key}
-     ::pc/output outputs
-     ::pc/batch? true
+    {::pc/sym     resolve-sym
+     ::pc/input   #{qualified-key}
+     ::pc/output  outputs
+     ::pc/batch?  true
      ::pc/resolve (cond-> (fn [{_ ::attr/key->attribute :as env} input]
                             (let [batch? (sequential? input)
-                                  db (env->asami env schema aso/databases)]
-                              (log/debug "In resolver:" qualified-key "inputs:" (cond-> input (instance? clojure.lang.LazySeq input) vec) "db ver:" (d/as-of-t db))
+                                  db     (env->asami env schema aso/databases)]
+                              (log/debug "In resolver:" qualified-key "inputs:" (cond-> input #?(:clj (instance? clojure.lang.LazySeq input) :cljs false) vec) "db ver:" (d/as-of-t db))
                               (->> (query/entities
                                      (assoc env ::asami/id-attribute id-attribute)
                                      input

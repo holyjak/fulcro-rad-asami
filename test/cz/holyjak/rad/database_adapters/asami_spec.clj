@@ -402,3 +402,8 @@
 ;                                (log/spy :info person-resolver)
 ;                                (::person/transform-succeeded person-resolver)) => true
 ;                              ))))
+
+(comment
+  (do
+    (require 'fulcro-spec.reporters.repl)
+    (fulcro-spec.reporters.repl/run-tests)))

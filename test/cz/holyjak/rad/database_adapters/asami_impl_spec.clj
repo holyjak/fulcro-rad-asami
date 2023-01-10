@@ -68,7 +68,7 @@
                                     [:db/add ref ::address/street "111 Main"]))
         delta {[::address/id id] {::address/id id
                                   ::address/street {:before "111 Main" :after "111 Main St"}}}]
-    (let [{:keys [tempid->txid txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->txid txn]} (write/delta->txn *env* :production delta)] ; FIXME delta->txn-with-retractions ?!
       (assertions
         "has no tempid mappings"
         (empty? tempid->txid) => true
