@@ -12,6 +12,13 @@
     [taoensso.timbre :as log]
     [cz.holyjak.rad.database-adapters.asami.util :as util]))
 
+(defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
+  "The attribute belongs to the current schema (= DB) and is a normal proerty, i.e. not the ID"
+  [{::attr/keys [key->attribute]} target-schema k]
+  (let [{:keys [::attr/schema]
+         ::attr/keys [identity?]} (key->attribute k)]
+    (and (= schema target-schema) (not identity?))))
+
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
   (if-let [node-id (ffirst (graph/resolve-triple graph '?n :id ident))]
     (for [prop singular-props
@@ -35,9 +42,10 @@
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
          not-empty)))
 
-(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as env} entity-delta]
+(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as env} schema entity-delta]
   (->> entity-delta
        (filter (fn [[k v]] (and (util/to-one? env k)
+                                (non-id-schema-prop? env schema k)
                                 (map? v)
                                 (contains? v :after))))
        (map key)
@@ -50,12 +58,12 @@
 
 (defn delta->singular-attrs-to-clear
   "Derives from the form delta and attribute definitions which singular attributes should be cleared of current value"
-  [key->attribute delta]
+  [key->attribute schema delta]
   (let [env {::attr/key->attribute key->attribute}]
    (->> (reduce-kv (fn [m [_ id-val :as ident] entity-delta]
                      (cond-> m
                              (not (tempid/tempid? id-val))
-                             (assoc!-some-1 ident (entity-delta->singular-attrs env entity-delta))))
+                             (assoc!-some-1 ident (entity-delta->singular-attrs env schema entity-delta))))
                    (transient {})
                    delta)
         persistent!
@@ -77,13 +85,6 @@
 ;  "Returns true if the ID in the given ident uses UUIDs for ids."
 ;  [{::attr/keys [key->attribute] :as env} ident]
 ;  (= :uuid (some-> ident first key->attribute ::attr/type)))
-
-(defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
-  "The attribute belongs to the current schema (= DB) and is a normal proerty, i.e. not the ID"
-  [{::attr/keys [key->attribute]} target-schema k]
-  (let [{:keys [::attr/schema]
-         ::attr/keys [identity?]} (key->attribute k)]
-    (and (= schema target-schema) (not identity?))))
 
 (defn generate-id                                           ; based on ...database-adapters.key-value.pathom/unwrap-id
   "Generate an id for a new entity being  saved. You need to pass a `suggested-id` as a UUID or a tempid.
@@ -172,9 +173,12 @@
 
    Returns a map with three keys:
     - `txn` - the Asami transactions themselves
-    - `tempid->generated-id` - mapping from Fulcro's tempids in delta to real, external IDs generated for the new entities"
+    - `tempid->generated-id` - mapping from Fulcro's tempids in delta to real, external IDs generated for the new entities
+
+   BEWARE: It does not retract existing values of singular attributes being updated/removed. It should not be used directly,
+   use [[delta->txn-with-retractions]] instead."
   [env schema delta]
-  [map? keyword? map? => map?]
+  [map? keyword? map? => map?] ; TODO Specify what env keys we actually use
   (let [tempid->generated-id (create-tempid->generated-id env delta)
         ;;; For new entities being created, add the identifier attributes - the :<entity>/id <val> and :id <ident> ones:
         new-ids-txn (eduction
@@ -192,3 +196,11 @@
                   (delta->value-txn
                     (assoc env :tempid->real-id tempid->generated-id)
                     schema delta)))}))
+
+(defn delta->txn-with-retractions
+  "Like [[delta->txn]] but includes retractions for all involved singular attributes."
+  [{::attr/keys [key->attribute] :as env} db schema delta]
+  (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
+                         (clear-singular-attributes-txn db))
+        change-txn  (delta->txn env schema delta)]
+    (concat retractions change-txn)))
