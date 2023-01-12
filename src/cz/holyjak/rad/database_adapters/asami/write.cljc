@@ -26,7 +26,7 @@
                                        (graph/resolve-triple graph node-id prop '?xval)
                                        #(-> % next count zero?)
                                        (str "More than one existing value on " ident " " prop)))]
-          :when existing-val]
+          :when (some? existing-val)]
       [:db/retract node-id prop existing-val])
     (do (log/warn "Expected to find an entity with the ident" ident "to clear its singular props but no match")
         nil))
@@ -143,15 +143,16 @@
   "Turns a single delta for a single entity and property into transaction(s) (multiple if cardinality = many)"
   [env+ eid k {:keys [before after] :as delta}] cat
   ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
-  (let [singular? (to-one? env+ k)]
-    ;; We turn singular values into a set so we can handle them in the same way as to-many; Asami does insert each
-    ;; set value separately, ie. never the whole set as-is.
-    ;; FIXME We it seems cannot trust the `before` and need to fetch the current attr values or use the force-replace magic...
-    (let [before (if singular? (some-> before hash-set) (set before))
-          after (if singular? (some-> after hash-set) (set after))]
-      (concat
-        (prop->tx-data env+ :db/retract eid k (set/difference before after))
-        (prop->tx-data env+ :db/add eid k (set/difference after before))))))
+
+  (let [singular? (to-one? env+ k)
+        ;; We turn singular values into a set so we can handle them in the same way as to-many; Asami does insert each
+        ;; set value separately, ie. never the whole set as-is.
+        before (if singular? (some-> before hash-set) (set before))
+        after (if singular? (some-> after hash-set) (set after))]
+    (concat
+      ;; Note: Singular attr values are retracted separately
+      (when-not singular? (prop->tx-data env+ :db/retract eid k (set/difference before after)))
+      (prop->tx-data env+ :db/add eid k (set/difference after before)))))
 
 (defn delta->value-txn
   "Turn Fulcro delta for non-id attributes into Asami tx-data"
@@ -203,4 +204,4 @@
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
                          (clear-singular-attributes-txn db))
         changes  (delta->txn env schema delta)]
-    (update changes :txn concat retractions)))
+    (update changes :txn (partial concat retractions))))

@@ -1,6 +1,7 @@
 (ns cz.holyjak.rad.database-adapters.asami.util
   "INTERNAL NS. Subject to change without warning."
   (:require
+    [asami.core :as d]
     [com.fulcrologic.rad.attributes :as attr]))
 
 (defn ensure!
@@ -34,3 +35,6 @@
   "Query turning an ident into Asami node id
   Usage: `(d/q q-ident->node-id db [:person/id #uuid \"...\")`"
   '[:find ?e . :where [?e :id ?ident] :in $ ?ident])
+
+(defn ident->node-id [db ident]
+  (d/q q-ident->node-id db ident))

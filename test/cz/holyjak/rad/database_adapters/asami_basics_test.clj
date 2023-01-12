@@ -7,17 +7,17 @@
 
 (def uri "asami:mem://asami-basics-test")
 
-(defn with-reset-database [tests]
+(defn reset-db []
   (d/delete-database uri)
-  (tests))
+  (swap! d/connections dissoc uri))
 
 (defn with-conn [tests]
+  (reset-db)
   (d/create-database uri)
   (let [conn (d/connect uri)]
     (binding [*conn* conn]
       (tests))))
 
-(use-fixtures :once with-reset-database)
 (use-fixtures :each with-conn)
 
 (defn db []

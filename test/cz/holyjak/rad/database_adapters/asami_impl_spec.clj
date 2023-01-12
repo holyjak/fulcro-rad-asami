@@ -33,13 +33,16 @@
   (:production (asami/start-connections {aso/databases {:production asami-config}})))
 
 (defn reset-db []
-  (d/delete-database (asami-core/config->url asami-config)))
+  (let [url (asami-core/config->url asami-config)]
+    (d/delete-database url)
+    (swap! d/connections dissoc url)))
 
-(defn with-reset-database [tests]
-  (reset-db)
-  (tests))
+;(defn with-reset-database [tests]
+;  (reset-db)
+;  (tests))
 
 (defn with-env [tests]
+  (reset-db)
   (let [conn (start-connection)]
     (binding [*conn* conn
               *env* {::attr/key->attribute key->attribute
@@ -47,7 +50,7 @@
                      #_#_aso/databases {:production (atom (d/db conn))}}]
       (tests))))
 
-(use-fixtures :once with-reset-database)
+;(use-fixtures :once with-reset-database)
 (use-fixtures :each with-env)
 
 (defn runnable? [txn]
@@ -64,37 +67,41 @@
 (specification "delta->txn: simple flat delta, existing entity, non-native ID. UPDATE to-one"
   (let [id (ids/new-uuid 1)
         ref [:id [::address/id id]]
-        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data [::address/id id])
-                                    [:db/add ref ::address/street "111 Main"]))
+        {db :db-after} @(d/transact *conn* (conj (write/new-entity-ident->tx-data [::address/id id])
+                                                 [:db/add ref ::address/street "111 Main"]))
+        node-id (util/ident->node-id db (second ref))
         delta {[::address/id id] {::address/id id
                                   ::address/street {:before "111 Main" :after "111 Main St"}}}]
-    (let [{:keys [tempid->txid txn]} (write/delta->txn *env* :production delta)] ; FIXME delta->txn-with-retractions ?!
+
+    (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->txid) => true
         "Includes lookup refs for the non-native ID, and changes for the facts that changed"
-        txn => [[:db/retract ref ::address/street "111 Main"]
+        txn => [[:db/retract node-id ::address/street "111 Main"]
                 [:db/add ref ::address/street "111 Main St"]]
         (runnable? txn) => true))
     (let [delta {[::address/id id] {::address/id id
                                     ::address/enabled? {:before nil :after false}}}]
-      (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+      (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
         (assertions
           "setting boolean false does an add"
           txn => [[:db/add ref ::address/enabled? false]])))
-    (let [delta {[::address/id id] {::address/id id
+    (let [{db' :db-after} @(d/transact *conn* [[:db/add ref ::address/enabled? false]])
+          delta {[::address/id id] {::address/id id
                                     ::address/enabled? {:before false :after nil}}}]
-      (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+      (tap> (d/q '[:find ?e ?a ?v :where [?e ?a ?v] [?e ::address/id]] db'))
+      (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db' :production delta)]
         (assertions
           "removing boolean false does a retract"
-          txn => [[:db/retract ref ::address/enabled? false]])))))
+          txn => [[:db/retract node-id ::address/enabled? false]])))))
 
 (specification "delta->txn: simple flat delta, existing entity, non-native ID. ADD to-one ATTRIBUTE"
   (let [id (ids/new-uuid 1)
         ref [:id [::address/id id]]
-        _ @(d/transact *conn* (write/new-entity-ident->tx-data [::address/id id]))
+        {db :db-after} @(d/transact *conn* (write/new-entity-ident->tx-data [::address/id id]))
         delta {[::address/id id] {::address/street {:after "111 Main St"}}}]
-    (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "Includes lookup refs for the non-native ID, and changes for the facts that changed"
         txn => [[:db/add ref ::address/street "111 Main St"]]
@@ -103,16 +110,17 @@
 (specification "delta->txn: simple flat delta, existing entity, non-native ID. DELETE to-one ATTRIBUTE"
   (let [id (ids/new-uuid 1)
         ref [:id [::address/id id]]
-        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data [::address/id id])
+        {db :db-after} @(d/transact *conn* (conj (write/new-entity-ident->tx-data [::address/id id])
                                     [:db/add ref ::address/street "111 Main"]))
+        node-id (util/ident->node-id db (second ref))
         delta {[::address/id id] {::address/id id
                                   ::address/street {:before "111 Main" :after nil}}}]
-    (let [{:keys [tempid->txid txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->txid) => true
         "Includes lookup refs for the non-native ID, and changes for the facts that changed"
-        txn => [[:db/retract ref ::address/street "111 Main"]]
+        txn => [[:db/retract node-id ::address/street "111 Main"]]
         (runnable? txn) => true))))
 
 #_; TODO fix?! - native id support
@@ -121,7 +129,7 @@
                          str-id (str (:id id1))
                          delta {[::person/id id1] {::person/id {:after id1}
                                                    ::person/email {:after "joe@nowhere.com"}}}]
-                     (let [{:keys [tempid->txid txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "includes tempid temporary mapping"
                          (get tempid->txid id1) => -1
@@ -134,7 +142,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/email {:after "joe@nowhere.net"}}}]
-                     (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/email "joe@nowhere.net"]]
@@ -145,7 +153,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/full-name {:before "Bob" :after "Bobby"}}}]
-                     (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/full-name "Bobby"]]
@@ -156,7 +164,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/full-name {:before "Bob"}}}]
-                     (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/retract id ::person/full-name "Bob"]]
@@ -172,7 +180,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/role {:after :admin}}}]
-                     (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/role :admin]]
@@ -184,7 +192,7 @@
                                                                        ::person/role :admin
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/role {:before :admin}}}]
-                     (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/retract id ::person/role :admin]]
@@ -198,12 +206,12 @@
   (let [id (rand-int 1000)
         ident [::person/id id]
         ref [:id ident]
-        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data ident)
+        {db :db-after} @(d/transact *conn* (conj (write/new-entity-ident->tx-data ident)
                                     [:db/add ref ::person/permissions [:read :write]]))
         delta {[::person/id id] {::person/id id
                                  ::person/permissions {:before [:read :write]
                                                        :after [:read :execute :write]}}}]
-    (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "Includes simple add of the added value"
         txn => [[:db/add ref ::person/permissions :execute]]
@@ -214,11 +222,11 @@
   (let [id (rand-int 1000)
         ident [::person/id id]
         ref [:id ident]
-        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data ident)
+        {db :db-after} @(d/transact *conn* (conj (write/new-entity-ident->tx-data ident)
                                     [:db/add ref ::person/permissions [:read :write]]))
         delta {[::person/id id] {::person/permissions {:before [:read :write]
                                                        :after [:execute]}}}]
-    (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         (set txn) => #{[:db/add ref ::person/permissions :execute]
@@ -263,7 +271,7 @@
                    [:db/add [:id [::address/id new-address-id2]] ::address/id new-address-id2]
                    [:db/add [:id [::address/id new-address-id2]] :a/entity true]
                    [:db/add [:id [::address/id new-address-id2]] ::address/street "B St"]}]
-    (let [{:keys [txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* (d/db *conn*) :production delta)]
       (assertions
         "Adds the non-native IDs, and the proper values"
         (set/difference (set txn) expected) => #{}
@@ -273,7 +281,7 @@
 (specification "Existing entity, add new to-one child"
   (let [person-ident [::person/id (ids/new-uuid 2)]
         addr-ident [::address/id (ids/new-uuid 3)]
-        _ @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
+        {db :db-after} @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
                                             (write/new-entity-ident->tx-data addr-ident))
                                     [:db/add [:id person-ident] ::person/full-name "Bob"]
                                     [:db/add [:id person-ident] ::person/addresses [:id addr-ident]]
@@ -283,7 +291,7 @@
         delta {person-ident {::person/primary-address {:after [::address/id new-address-tempid]}}
                [::address/id new-address-tempid] {::address/id new-address-tempid
                                                   ::address/street {:after "B St"}}}]
-    (let [{:keys [tempid->generated-id txn]} (write/delta->txn *env* :production delta)]
+    (let [{:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
       (assertions
         "Returns tempid mappings"
         tempid->generated-id => {new-address-tempid new-address-id}
@@ -300,7 +308,7 @@
   (let [person-id (ids/new-uuid 2)
         person-ident [::person/id person-id]
         orig-address-id1 (ids/new-uuid 1)
-        _ @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
+        {db :db-after} @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
                                             (write/new-entity-ident->tx-data [::address/id orig-address-id1]))
                                     [:db/add [:id person-ident] ::person/full-name "Bob"]
                                     [:db/add [:id [::address/id orig-address-id1]] ::address/street "A St"]))
@@ -310,7 +318,7 @@
                                                  :after [[::address/id orig-address-id1] [::address/id new-addr-tempid]]}}
                [::address/id new-addr-tempid] {::address/id new-addr-tempid
                                                ::address/street {:after "B St"}}}
-        {:keys [tempid->generated-id txn]} (write/delta->txn *env* :production delta)]
+        {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
     (assertions
       "Includes remappings for new entities"
       tempid->generated-id => {new-addr-tempid new-addr-id}
@@ -329,7 +337,7 @@
   (let [person-id (ids/new-uuid 1)
         person-ident [::person/id person-id]
         orig-address-id1 (ids/new-uuid 1)
-        _ @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
+        {db :db-after} @(d/transact *conn* (conj (concat (write/new-entity-ident->tx-data person-ident)
                                             (write/new-entity-ident->tx-data [::address/id orig-address-id1]))
                                     [:db/add [:id person-ident] ::person/full-name "Bob"]
                                     [:db/add [:id [::address/id orig-address-id1]] ::address/street "A St"]))
@@ -340,7 +348,7 @@
                                                  :after [[::address/id new-address-tempid1]]}}
                [::address/id new-address-tempid1] {::address/id new-address-tempid1
                                                    ::address/street {:after "B St"}}}
-        {:keys [tempid->generated-id txn]} (write/delta->txn *env* :production delta)]
+        {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
     (assertions
       "Includes remappings for new entities"
       tempid->generated-id => {new-address-tempid1 new-address-id1}
@@ -364,8 +372,8 @@
                                               ::person/addresses {:after [[::address/id address-tempid]]}}
                  [::address/id address-tempid] {::address/id address-tempid
                                                 ::address/street {:after "B St"}}}
-          {:keys [txn]} (write/delta->txn *env* :production delta)
-          _ @(d/transact *conn* txn)
+          {:keys [txn]} (write/delta->txn-with-retractions *env* (d/db *conn*) :production delta)
+          {db :db-after} @(d/transact *conn* txn)
           person (query/entities
                    {::attr/key->attribute key->attribute
                     ::asami/id-attribute {::attr/qualified-key ::person/id}}

@@ -120,3 +120,20 @@ Limitations and features that are not supported:
 Not tested:
 
 * Multiple databases / schemas
+
+== Development
+
+=== Testing
+
+Run tests: `clj -M:test:run-tests`
+
+Also see the `(comment ..)` at the bottom of most `-spec` tests for running those in the REPL.
+
+.Focusing a test
+====
+```clojure
+(specification "descr." :focus ...)
+```
+====
+
+then run `(fulcro-spec.reporters.repl/run-tests (comp :focus meta))`
