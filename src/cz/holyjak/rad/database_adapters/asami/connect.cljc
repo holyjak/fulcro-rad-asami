@@ -39,26 +39,8 @@
   (def dbm (:main conn))
 
   (def graph (d/graph (d/db dbm)))
-  ; TO DO: transact `tx3` below
+
   (def node-id (ffirst (graph/resolve-triple graph '?n :id [:order/id 2]))) ; => :a/node-27481
-
-  (d/q cz.holyjak.rad.database-adapters.asami.util/q-ident->node-id
-       (d/db dbm)
-       [:order/id 2])
-
-  (d/entity (d/db dbm) node-id)
-  (asami.entities.writer/entity-update->triples
-    graph
-    node-id
-    {:id [:order/id 2]
-     :order/descr "updated"})
-
-  ;; WIP: Ensure singular attributes by removing existing values
-  ;; WIP Get all [k v] pairs for the given node-id (refs are just node ids)
-  ; (asami.entities.reader/property-values graph node-id) ; all current props; calls ± resolve-triple
-  (graph/resolve-triple graph node-id :order/descr '?xval) ; -> (["Order ABC"])
-  (d/q '[:find ?xval :where [?e :order/descr ?xval] :in $ ?e] (d/db dbm) node-id)
-
 
   (#'asami.core/as-graph dbm)
   (satisfies? asami.graph/Graph dbm)

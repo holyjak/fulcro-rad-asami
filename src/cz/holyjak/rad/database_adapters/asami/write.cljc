@@ -4,13 +4,17 @@
     [asami.core :as d]
     [asami.graph :as graph]
     [clojure.set :as set]
-    [com.fulcrologic.guardrails.core :refer [>defn => ?]]
+    [clojure.spec.alpha :as s]
+    [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
     [cz.holyjak.rad.database-adapters.asami.util :refer [ensure! ref? to-one?]]
     [taoensso.timbre :as log]
     [cz.holyjak.rad.database-adapters.asami.util :as util]))
+
+(s/def ::attr/key->attribute map?)
+(s/def ::env (s/keys :req [::attr/key->attribute]))
 
 (defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
   "The attribute belongs to the current schema (= DB) and is a normal proerty, i.e. not the ID"
@@ -24,19 +28,19 @@
     (for [prop singular-props
           :let [existing-val (ffirst (ensure!
                                        (graph/resolve-triple graph node-id prop '?xval)
-                                       #(-> % next count zero?)
+                                       (comp empty? next)
                                        (str "More than one existing value on " ident " " prop)))]
           :when (some? existing-val)]
       [:db/retract node-id prop existing-val])
     (do (log/warn "Expected to find an entity with the ident" ident "to clear its singular props but no match")
-        nil))
-
-  )
+        nil)))
 
 (defn clear-singular-attributes-txn
   "Generate retractions for existing values of the given `singular-props` attributes of the given `ident` entities
   NOTE: It only clears the single attribute. If it points to a dependant entity, it remains in existence.
   Hopefully RAD handles removing those."
+  ;; Perhaps add an attribute flag telling us what entities cannot exist on their own and only have 1 parent and thus
+  ;; should be deleted?
   [db ident->singular-props]
   (let [graph (d/graph db)]
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
@@ -150,7 +154,7 @@
         before (if singular? (some-> before hash-set) (set before))
         after (if singular? (some-> after hash-set) (set after))]
     (concat
-      ;; Note: Singular attr values are retracted separately
+      ;; Note: Singular attr values are retracted separately, see clear-singular-attributes-txn
       (when-not singular? (prop->tx-data env+ :db/retract eid k (set/difference before after)))
       (prop->tx-data env+ :db/add eid k (set/difference after before)))))
 
@@ -166,7 +170,7 @@
                   entity-delta))))
     delta))
 
-(>defn delta->txn
+(>defn delta->txn*
   "Turn Fulcro form delta into an Asami update transaction. Example delta (only one entry):
 
   {[:account/id #uuid \"ffffffff-ffff-ffff-ffff-000000000100\"]
@@ -179,7 +183,7 @@
    BEWARE: It does not retract existing values of singular attributes being updated/removed. It should not be used directly,
    use [[delta->txn-with-retractions]] instead."
   [env schema delta]
-  [map? keyword? map? => map?] ; TODO Specify what env keys we actually use
+  [::env keyword? map? => map?] ; TODO Specify what env keys we actually use
   (let [tempid->generated-id (create-tempid->generated-id env delta)
         ;;; For new entities being created, add the identifier attributes - the :<entity>/id <val> and :id <ident> ones:
         new-ids-txn (eduction
@@ -203,5 +207,5 @@
   [{::attr/keys [key->attribute] :as env} db schema delta]
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
                          (clear-singular-attributes-txn db))
-        changes  (delta->txn env schema delta)]
+        changes  (delta->txn* env schema delta)]
     (update changes :txn (partial concat retractions))))
