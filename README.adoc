@@ -60,7 +60,36 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 
 See a complete usage example in https://github.com/fulcrologic/fulcro-rad-demo .
 
-TIP: It is better to call `asami.core/shutdown` when shutting down the backend to ensure that the database files are not unnecessarily large. (They are created with more space so that data can be inserted quickly and shutdown trims them to the actual content.)
+TIP: It is better to call `asami.core/shutdown` when shutting down the backend to ensure that the database files are not unnecessarily large. Though you can likely simply rely on the JVM shutdown hook calling this, which Asami itself registers. (They are created with more space so that data can be inserted quickly and shutdown trims them to the actual content.)
+(Beware: as of Asami 2.3.2, when you call `shutdown`, it will close files but not reset the internal `connections` map and subsequent `asami/start-connections` will not re-initialize them properly. So avoid calling shutdown repeatedly during REPLing.)
+
+=== Tips
+
+==== Lookup refs
+
+When inserting data manually, remember to set `:id <ident>`. You can then use it as a lookup ref, e.g. in add: `[:db/add [:id <ident>] <prop> <val>]`.
+
+=== Troubleshooting
+
+==== Enable debug logging
+
+You can enable debug logging for the adapter. With fulcro-rad-demo or fulcro-template you can configure this in e.g. its `dev.edn`:
+
+```diff
+- {:taoensso.timbre/logging-config {:min-level :info}}
++ {:taoensso.timbre/logging-config {:min-level [[#{"cz.holyjak.rad.database-adapters.asami.*"} :debug]
++                                               [#{"*"} :info]]}}
+
+```
+
+==== Exploring the data
+
+Fetch all the entity-attribute-value triples from the database:
+
+```clojure
+(d/q [:find '?e '?a '?v :where '[?e ?a ?v]]
+       (d/db (:production asami-connections)))
+```
 
 == More info
 
@@ -68,13 +97,17 @@ TIP: It is better to call `asami.core/shutdown` when shutting down the backend t
 
 The order of multi-valued attributes is lost (Asami returns them as sets, which we turn into a vector).
 
-As of Asami 2.3.2 you cannot create an entity and _refer_ to the entity from another one in the same transaction when using the entity form of `tx-data`. If the entity and reference are both created using the quadruplets form (`[:db/add <entity> <attr> <val>`) https://github.com/quoll/asami/pull/2[then this works].
+As of Asami 2.3.2 you cannot create an entity and _refer_ to the entity from another one in the same transaction when using the _entity form_ of `tx-data`. If the entity and reference are both created using the quadruplets form (`[:db/add <entity> <attr> <val>`) https://github.com/quoll/asami/pull/2[then this works].
 
 === Implementation details
 
 We assoc to each persistent entity `:id <ident>` (see link:++https://github.com/quoll/asami/wiki/4.-Transactions#identity-values++[Asami's Identity Values]) so that we can easily refer to it in statements and from other entities. This is then used as a _lookup ref_ in insert/update statements and in `:ref` attributes of other properties. (`:ref` attributes stored via a form are automatically translated into this form.) However this property is dissoc-ed when reading. (We could likely also use `:db/ident` instead though this has not been tested.)
 
 We store the full ident in the `:id` because we cannot be sure that the ID values are globally unique though we know that Fulcro would break if they were not unique for the given entity. (Actually they should be globally unique, being UUIDs, but we might want to support other kinds of IDs in the future that do not guarantee this. We could store the full ident only on such attributes - and maybe we will.)
+
+=== Design decisions
+
+**Quadruples over entities** We translate each Fulcro entity diff into a series of quadruplet assertions and retractions and transact these. The reason for this is that we might want to transact multiple new entities that refer to each other in a single transaction (think of saving a form with a subform). I am not sure Asami tempids work for this and in any case they are not ideal because, in the face of no schema, they are just negative integers and then even regular attribute value that happen to be negative integers matching one of the tempids would be replaced with a reference. Instead, we use lookup ids such as `{:id [:entity/id #uuid "some-value"]}` but these require that the entity already exists, when used in the entity form, while quadruplets manage to create a new entity and resolve references to it (see https://github.com/quoll/asami/pull/2). One of the disadvantages is that we cannot use the `attribute'` or `attribute+` shorthand forms.
 
 == Limitations
 
@@ -87,3 +120,20 @@ Limitations and features that are not supported:
 Not tested:
 
 * Multiple databases / schemas
+
+== Development
+
+=== Testing
+
+Run tests: `clj -M:test:run-tests`
+
+Also see the `(comment ..)` at the bottom of most `-spec` tests for running those in the REPL.
+
+.Focusing a test
+====
+```clojure
+(specification "descr." :focus ...)
+```
+====
+
+then run `(fulcro-spec.reporters.repl/run-tests (comp :focus meta))`

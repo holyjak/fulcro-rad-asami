@@ -9,8 +9,7 @@
     [cz.holyjak.rad.database-adapters.asami.read :as common]
     [fulcro-spec.core :refer [specification assertions]]
     [clojure.test :refer [use-fixtures]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [asami.graph :as graph]))
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}

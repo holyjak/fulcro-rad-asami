@@ -1,4 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami.read
+  "Support for reading RAD entities from Asami"
   (:require
     [clojure.spec.alpha :as s]
     [com.fulcrologic.guardrails.core :refer [>def >defn =>]]

@@ -7,6 +7,7 @@
     [taoensso.timbre :as log]))
 
 (defn config->url [{:asami/keys [driver] :as config}]
+  {:pre [config]}
   (assert driver (str "The provided `config` lacks the required key `:asami/driver`. Actual keys: " (keys config)))
   (case driver
     :mem (str "asami:mem://" (:asami/database config))
@@ -34,8 +35,15 @@
   ;(set! *data-readers* graph/node-reader)
   (d/create-database (config->url {:asami/driver :local, :asami/database "playground3"}))
   @(def conn (start-connections {aso/databases {:main {:asami/driver :local, :asami/database "playground3"}}}))
-  @(def conn (start-connections {aso/databases {:main {:asami/driver :mem, :asami/database "fulcro-rad-demo"}}}))
+  @(def conn (start-connections {aso/databases {:main {:asami/driver :mem, :asami/database "test123"}}}))
   (def dbm (:main conn))
+
+  (def graph (d/graph (d/db dbm)))
+
+  (def node-id (ffirst (graph/resolve-triple graph '?n :id [:order/id 2]))) ; => :a/node-27481
+
+  (#'asami.core/as-graph dbm)
+  (satisfies? asami.graph/Graph dbm)
 
   (d/delete-database "asami:mem://test123")
   (d/create-database "asami:mem://test123")
@@ -44,11 +52,6 @@
     @(d/transact conn {:tx-data [{:id [:person/id "person2"]}
                                  [:db/add [:id [:person/id "person2"]] :person/full-name "Bob"]]})
     :tx-data)
-  ;; FIXME: The :db/add does NOT resolve `[:id ...]`. Relevant:
-  ;; you try to reference it with:
-  ;[:id [:cz.holyjak.rad.test-schema.address/id #uuid "ffffffff-ffff-ffff-ffff-000000000001"]]
-  ;That tells the transactor to look up a node that has that as an id. But... there IS no node that has that as an ID.
-  ; You're still creating it, so it doesn't exist yet. It won't exist until the end of the transaction
 
   (let [conn ...]
     @(d/transact conn {:tx-data [{:db/id -1 :id [:duplicate-test/id :SAME]}]})

@@ -36,13 +36,13 @@
   (:production (asami/start-connections {aso/databases {:production asami-config}})))
 
 (defn reset-db []
-  (d/delete-database (asami-core/config->url asami-config)))
+  (let [url (asami-core/config->url asami-config)]
+    (d/delete-database url)
+    (swap! d/connections dissoc url)))
 
-(defn with-reset-database [tests]
-  (reset-db)
-  (tests))
 
 (defn with-env [tests]
+  (reset-db)
   (let [conn (start-connection)]
     (binding [*conn* conn
               *env* {::attr/key->attribute key->attribute
@@ -50,7 +50,6 @@
                      #_#_aso/databases {:production (atom (d/db conn))}}]
       (tests))))
 
-(use-fixtures :once with-reset-database)
 (use-fixtures :each with-env)
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
@@ -398,3 +397,8 @@
 ;                                (log/spy :info person-resolver)
 ;                                (::person/transform-succeeded person-resolver)) => true
 ;                              ))))
+
+(comment
+  (do
+    (require 'fulcro-spec.reporters.repl)
+    (fulcro-spec.reporters.repl/run-tests)))
