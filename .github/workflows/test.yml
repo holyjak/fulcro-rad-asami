@@ -1,12 +1,14 @@
 name: Run tests
 on:
-  push:
-    branches:
-      - main
+  - pull_request
+  - push
 
 jobs:
   test:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        pathom_ver: [2, 3]
     steps:
       - name: Cache All The Things
         uses: actions/cache@v3
@@ -33,4 +35,4 @@ jobs:
           # clj-kondo: 2022.05.31
 
       - name: Run tests
-        run: clojure -M:test:run-tests
+        run: clojure -M:pathom${{ matrix.pathom_ver }}:test:run-tests

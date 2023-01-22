@@ -1,16 +1,20 @@
 (ns cz.holyjak.rad.test-schema.person
   (:require
     [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    [com.wsscode.pathom.connect :as pc]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
+    [taoensso.timbre :as log]))
 
 (defattr id ::id :uuid ;:long
-  {::attr/identity? true
+  {::attr/identity?                                         true
    ;aso/native-id?    true
-   ::attr/schema    :production
-   ::pc/transform   (fn [resolver]
-                      (assoc resolver ::transform-succeeded true))})
+   ::attr/schema                                            :production
+   ;; Hopefully a future version of Pathom will behave better
+   ;ao/pathom3-resolve (fn [resolver]
+   ;                     (assoc resolver ::transform-succeeded true))
+   ;ao/pc-resolve      (fn [resolver]
+   ;                     (assoc resolver ::transform-succeeded true))
+   })
 
 (defattr full-name ::full-name :string
   {::attr/schema     :production

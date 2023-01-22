@@ -27,22 +27,39 @@
 
     :else x))
 
-
-
 (defn- transform-entity
   "Adjust raw Asami data so that it is suitable for Pathom"
   [{_ ::attr/key->attribute :as env} entity]
   {:pre [entity (::attr/key->attribute env)]}
   (reduce-kv
     (fn [m k v]
-      (let [to-many?? (to-many? env k)
+      (let [pr-type #(let [t (type %)] (if #?(:clj (class? t) :cljs false) (.getSimpleName t) (str t)))
+            to-many?? (to-many? env k)
+            ensure-ref-is-map! (fn [v' v-orig]
+                                 (let [ref-val (cond-> v' to-many?? first)]
+                                   (assert (map? ref-val) ; could fail due to badly inserted data
+                                           (str "c.h.r.d.asami.read/transform-entity: The ref in the the to-"
+                                                (if to-many?? "many" "one")
+                                                " attr " k " should be a map (w/ :<?>/id) but it's type is "
+                                                (pr-type ref-val) " The whole (processed) value of the attr is: "
+                                                (pr-str v') (when (not= v' v-orig)
+                                                              (str " Its original value was " (pr-str v-orig)))))
+                                   v'))
+            _ (when (and to-many?? (set? v) (= 1 (count v)) (vector? (first v)) (next (first v)) (map? (ffirst v)))
+                ;; We got st. like #{[{:x/id "1"}, ...]}, which indicates badly inserted data where the user wanted to
+                ;; insert multiple entities/refs but ended up with a single value of type vector instead
+                (throw (ex-info (str "Bad to-many attribute value inserted in the DB: Should have been multiple "
+                                     " entities but is a single vector value containing these entities. Attr.: "
+                                     k)
+                                {:attribute-key k, :attribute-value v, :entity m})))
+
             v' (cond-> v
                        (nil? v)
-                       (do (log/warn "nil value in database for attribute" k) ; TODO Not sure why this, does it ever happen? remove?
+                       (do (log/warn "nil value in database for attribute" k) ; Note: Not sure that this can ever happen
                            v)
 
                        ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
-                       ;; => unify to always be a set
+                       ;; => unify to always be a vector
                        (and to-many??
                             (not (set? v))
                             (not (sequential? v)))
@@ -55,25 +72,25 @@
 
                        ;; 1. Translate refs from Asami's {:id [<id prop> <val>]} to Pathom's {<id prop> <val>}
                        ;; 2. For nested child entities (created using the {} form of tx-data), transform recursively
-                       (ref? env k) ; should always be map for a ref *in theory*
-                       (-> (util/ensure! #(map? (cond-> % to-many?? first)) ; could fail due to badly inserted data
-                                         (str "The ref in the the to-" (if to-many?? "many" "one")
-                                              " attr " k " should be a map but is " (pr-str v)))
-                           (->> (util/map-over-many-or-one to-many?? (comp (partial transform-entity env) asami-ref->pathom)))))]
+                       (ref? env k) ; should always be a map for a ref *in theory*
+                       (ensure-ref-is-map! v))]
         (assoc m k v')))
     {}
     (dissoc entity :id)))
 
-(defn- ids->entities [db qualified-key ids]
-  ;; We require that each entity has `:id [:<entity>/id <id value>]` and thus use that for the look up:
-  ;; (if we supported native IDs then we could also (asami.grph/new-node long-id-value) but would need the
-  ;; RAD attribute to decide
-  (sequence
-    ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
-    ;; data of the child, we would need to pass the 3rd argument (nested?) as true
-    (comp (map #(d/entity db [qualified-key %]))
-          (remove nil?))
-    ids))
+(defn- ids->entities
+  ([db qualified-key ids] (log/spy :info (ids->entities db qualified-key ids true)))
+  ([db qualified-key ids nested?]
+   ;; We require that each entity has `:id [:<entity>/id <id value>]` and thus use that for the lookup:
+   ;; (if we supported native IDs then we could also (asami.graph/new-node long-id-value) but would need the
+   ;; RAD attribute to decide
+   (sequence
+     ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
+     ;; data of the child, we would need to pass the 3rd argument (nested?) as true
+     (comp (map #(d/entity db [qualified-key %] (if (= nested? false?) false true)))
+           (remove nil?)) ; note: remove nil? messes up with Pathom batching expecting the same number of results, with
+                          ; id for the missing; fortunately P. provides a fn to fix it upstream, which we do
+     ids)))
 
 (comment
   ;(d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
@@ -97,9 +114,10 @@
                           ::asami/id-attribute]))
 
 (>defn entities
-  "Query the database for an entity or entities. Uses the `id-attribute` to get the entity's id attribute name and the `input` that
-  should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`)"
-  [{_ ::attr/key->attribute ::asami/keys [id-attribute] :as env}
+  "Query the database for an entity or entities. Uses the `id-attribute` to get the entity's id attribute name and the
+  `input` that should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`).
+  Returns the data in a Pathom-friendly way (i.e. to-many value becomes always a vector)."
+  [{_ ::attr/key->attribute ::asami/keys [fetch-nested? id-attribute] :as env}
    input
    db]
   [map? ::id-map-or-maps any? => ::entity-or-entities]
@@ -108,7 +126,7 @@
     (let [ids (if batch?
                 (into [] (keep qualified-key) input)
                 [(get input qualified-key)])
-          entities (ids->entities db qualified-key ids)
+          entities (ids->entities db qualified-key ids #_fetch-nested?) ; value of nested? seems to have no effect
           result (sequence (map (partial transform-entity (select-keys env [::attr/key->attribute]))) entities)]
       (if batch?
         result

@@ -1,14 +1,15 @@
 (ns cz.holyjak.rad.database-adapters.asami-spec
   "High-level 'integration' tests independent of implementation details"
   (:require
+    [clojure.set :as set]
     [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.rad.attributes :as attr]
+    [com.fulcrologic.rad.attributes-options :as ao]
     [com.fulcrologic.rad.form :as form]
-    [com.fulcrologic.rad.pathom :as pathom]
     [cz.holyjak.rad.database-adapters.asami :as asami]
     [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
-    [cz.holyjak.rad.database-adapters.asami.pathom :as asami-pathom]
+    [cz.holyjak.rad.database-adapters.asami.pathom-common :as asami-pathom-common]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [com.fulcrologic.rad.ids :as ids]
@@ -18,8 +19,7 @@
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component => =check=> =fn=>]]
     [fulcro-spec.check :as _]
-    [cz.holyjak.rad.database-adapters.asami.read :as query]
-    [com.wsscode.pathom.connect :as pc]))
+    [cz.holyjak.rad.database-adapters.asami.read :as query]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -56,19 +56,53 @@
 ;;; Auto-generated resolvers
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
-(pc/defresolver cities-resolver [{city-ids ::cities} _]
-  {:pc/output [::all-cities]}
+(defn universal-parser [all-attributes all-resolvers]
+  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+    (let [env-middleware (-> (attr/wrap-env all-attributes)
+                             (form/wrap-env (asami/wrap-save) (asami/wrap-delete))
+                             (asami/wrap-env (fn [env] {:production *conn*})))]
+      ((requiring-resolve 'com.fulcrologic.rad.pathom3/new-processor) {} env-middleware [] all-resolvers))
+    ((requiring-resolve 'com.fulcrologic.rad.pathom/new-parser)
+      {}
+      [(attr/pathom-plugin all-attributes)
+       (form/pathom-plugin (asami/wrap-save) (asami/wrap-delete))
+       #_:clj-kondo/ignore
+       (asami/pathom-plugin (fn [_env] {:production *conn*}))]
+      all-resolvers)))
+
+;(comment
+;  (let [conn (start-connection)
+;        temp-address-id (tempid/tempid)
+;        delta {[::address/id temp-address-id] {::address/id {:after temp-address-id}
+;                                               ::address/street {:after "A St"}}}
+;        ]
+;    (binding [*conn* conn
+;              *env*  {::attr/key->attribute key->attribute
+;                      aso/connections       {:production conn}
+;                      #_#_aso/databases {:production (atom (d/db conn))}}]
+;
+;      ((universal-parser all-attributes [#_automatic-resolvers form/resolvers]) {}
+;       `[{(form/save-form ~{::form/id        temp-address-id
+;                            ::form/master-pk ::address/id
+;                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}]))))
+
+(defmacro universal-defresolver [name args config body]
+  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+    `(com.wsscode.pathom3.connect.operation/defresolver ~name ~args ~config ~body)
+    `(do (require 'com.wsscode.pathom.connect)
+         (com.wsscode.pathom.connect/defresolver
+           ~name ~args ~(set/rename-keys config {ao/pathom3-output ao/pc-output}) ~body))))
+
+#_:clj-kondo/ignore
+(universal-defresolver cities-resolver [{city-ids ::cities} _]
+  {:com.wsscode.pathom3.connect.operation/output [::all-cities]}
   {::all-cities city-ids})
 
 (specification "Auto-generated resolvers"
-  (let [;save-middleware (asami-pathom/wrap-save)
-        ;delete-middleware (asami-pathom/wrap-delete)
-        automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
-        parser (pathom/new-parser {}
-                                  [(attr/pathom-plugin all-attributes)
-                                   ;(form/pathom-plugin save-middleware delete-middleware)
-                                   (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
-                                  [automatic-resolvers form/resolvers cities-resolver])]
+  (let [;save-middleware (asami/wrap-save)
+        ;delete-middleware (asami/wrap-delete)
+        automatic-resolvers (asami/generate-resolvers all-attributes :production)
+        parser (universal-parser all-attributes [automatic-resolvers form/resolvers cities-resolver])]
     (component "independent entities"
       (let [p1 [::person/id "bob"]
             a1 [::address/id "osl"]
@@ -82,14 +116,14 @@
         @(d/transact *conn* txn)
         (assertions
           "Looking up something that does not exist"
-          (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} :com.wsscode.pathom.core/errors])
+          (parser {} [{[::address/id "no such id"] [::address/id ::address/street]} ])
           ;; NOTE: No error returned due to RAD plugins; w/o the we would get also
           ;; {[..] {::address/street ::p/not-found}, ::p/errors ::p/not-found}
           => {[::address/id "no such id"] {::address/id "no such id"}} ; b/c Pathom returns just the ident if it cannot find it and our plugins remove errors)
           "An existing entity is returned with the requested referred entity's details (w/ correct singular & multi-valued props)"
           (parser {} [{[::person/id "bob"] [::person/id ::person/nicks ::person/full-name
                                             {::person/addresses [::address/street]}
-                                            {::person/primary-address [::address/street]}]} :com.wsscode.pathom.core/errors])
+                                            {::person/primary-address [::address/street]}]} ])
           => {[::person/id "bob"] {::person/id "bob"
                                    ::person/nicks ["Bobby"],
                                    ::person/full-name "Bob",
@@ -97,15 +131,18 @@
                                    ::person/primary-address {::address/street "Oslo St."}}})))
     (component "child entities"
       ;; Use the entity form of tx, which permits specifying nested, dependent entities:
-      @(d/transact *conn* {:tx-data [{:id [::person/id "ann"]
+      @(d/transact *conn* {:tx-data [{:id [::address/id "a-one"]
+                                      ::address/id "a-one"
+                                      ::address/street "First St."}
+                                     {:id [::address/id "a-two"]
+                                      ::address/id "a-two"
+                                      ::address/street "Second St."}
+                                     {:id [::person/id "ann"]
                                       ::person/id "ann"
-                                      ::person/addresses [{::address/id "a-one"
-                                                           ::address/street "First St."}
-                                                          {::address/id "a-two"
-                                                           ::address/street "Second St."}]}]})
+                                      ::person/addresses [{:id [::address/id "a-one"]} {:id [::address/id "a-two"]}]}]})
       (assertions
         "The dependent child entities are returned with the parent entity"
-        (parser {} [{[::person/id "ann"] [{::person/addresses [::address/street]}]} :com.wsscode.pathom.core/errors])
+        (parser {} [{[::person/id "ann"] [{::person/addresses [::address/street]}]}])
         => {[::person/id "ann"] {::person/addresses [{::address/street "First St."}
                                                      {::address/street "Second St."}]}}))
     (component "child entities with nested references"
@@ -113,15 +150,17 @@
       (d/transact *conn* {:tx-data [{:id [::address/city-id (ids/new-uuid 1)]
                                      ::address/city-id (ids/new-uuid 1)
                                      ::address/city-name "Oslo"}]})
-      @(d/transact *conn* {:tx-data [{:id [::person/id "garry"]
+      @(d/transact *conn* {:tx-data [{:id [::address/id "a-one"]
+                                      ::address/id "a-one"
+                                      ::address/street "First St."
+                                      ::address/city [:id [::address/city-id (ids/new-uuid 1)]]}
+                                     {:id [::person/id "garry"]
                                       ::person/id "garry"
-                                      ::person/addresses [{::address/id "a-one"
-                                                           ::address/street "First St."
-                                                           ::address/city [:id [::address/city-id (ids/new-uuid 1)]]}]}]})
+                                      ::person/addresses [{:id [::address/id "a-one"]}]}]})
       (assertions
         "The dependent child entities have their references resolved"
         (parser {} [{[::person/id "garry"] [{::person/addresses [::address/street
-                                                                 {::address/city [::address/city-name]}]}]} :com.wsscode.pathom.core/errors])
+                                                                 {::address/city [::address/city-name]}]}]} ])
         => {[::person/id "garry"] {::person/addresses [{::address/street "First St."
                                                         ::address/city {::address/city-name "Oslo"}}]}}))
     (component "multiple entities"
@@ -170,7 +209,7 @@
                                                    ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
                             existing-addr-ident {::address/id (second existing-addr-ident)
                                                  ::address/street {:before "A St" :after "A1 St"}}}
-                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
+                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
                      real-id (get tempids tempid1)
                      person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
@@ -200,7 +239,7 @@
                                                    ::person/role {:after :cz.holyjak.rad.test-schema.person.role/user}}
                             [::address/id tempid3] {::address/id tempid3
                                                     ::address/street {:after "B St"}}}
-                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})
+                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
                      person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id (get tempids tempid2)}
@@ -232,7 +271,7 @@
                                                               :after :cz.holyjak.rad.test-schema.person.role/admin}}
                             [::address/id tempid4] {::address/id tempid4
                                                     ::address/street {:after "C St"}}}
-                     _ (asami-pathom/save-form! *env* {::form/delta delta})
+                     _ (asami-pathom-common/save-form! *env* {::form/delta delta})
                      person (query/entities
                               {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
                               {::person/id id2}
@@ -256,7 +295,7 @@
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
                               [::address/id tempid2] {::address/street {:after "A1 St"}}}
-                     {:keys [tempids]} (asami-pathom/save-form! *env* {::form/delta delta})]
+                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})]
                  (assertions
                    ;"Returns a native ID remap for entity using native IDs"
                    ;(pos-int? (get tempids tempid1)) => true
@@ -272,7 +311,7 @@
         addr-ident [::address/id addr-id]
         _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data addr-ident)
                                     [:db/add [:id addr-ident] ::address/street "X St"]))
-        _ (asami-pathom/delete-entity! *env* {::address/id addr-id})
+        _ (asami-pathom-common/delete-entity! *env* {::address/id addr-id})
         db (d/db *conn*)]
     (assertions
       "Entity exists no more"
@@ -292,14 +331,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "Pathom parser integration (save + generated resolvers)"
-               (let [save-middleware     (asami-pathom/wrap-save)
-                     delete-middleware   (asami-pathom/wrap-delete)
-                     automatic-resolvers (asami-pathom/generate-resolvers all-attributes :production)
-                     parser (pathom/new-parser {}
-                                               [(attr/pathom-plugin all-attributes)
-                                                (form/pathom-plugin save-middleware delete-middleware)
-                                                (asami-pathom/pathom-plugin (fn [_env] {:production *conn*}))]
-                                               [automatic-resolvers form/resolvers])]
+               (let [save-middleware     (asami/wrap-save)
+                     delete-middleware   (asami/wrap-delete)
+                     automatic-resolvers (asami/generate-resolvers all-attributes :production)
+                     parser (universal-parser all-attributes [automatic-resolvers form/resolvers])]
                  #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)
                  (component "Saving new items (native ID)"
                             (let [temp-person-id (tempid/tempid)
@@ -338,7 +373,7 @@
                               (component "Deleting a saved item"
                                          (assertions
                                            "The deletion succeeds"
-                                           (parser {} `[{(form/delete-entity ~{::address/id real-id}) [:com.wsscode.pathom.core/errors]}])
+                                           (parser {} `[{(form/delete-entity ~{::address/id real-id}) []}])
                                            => {`form/delete-entity {}}
                                            "The entity is deleted" ; i.e. Pathom returns just the ident as-is
                                            (parser {} [{[::address/id real-id] [::address/id ::address/street]}])
@@ -373,13 +408,10 @@
 (comment
   (def repl-conn (start-connection))
   (reset-db)
-  (let [_parser (pathom/new-parser {}
-                                  [(attr/pathom-plugin all-attributes)
-                                   (asami-pathom/pathom-plugin (fn [_env] {:production repl-conn}))]
-                                  [(asami-pathom/generate-resolvers all-attributes :production)])]
+  (let [_parser (universal-parser all-attributes [(asami/generate-resolvers all-attributes :production)])]
     ;(_parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [{::person/primary-address [::address/id ::address/street]}]}])
     ;(parser {} #_asami-pathom/*env [{[::person/id (:id *pid)] [::person/primary-address]}])
-    (_parser {} [[:no-such-thing :ident] :com.wsscode.pathom.core/errors :com.wsscode.pathom.connect/errors])
+    (_parser {} [[:no-such-thing :ident]])
     )
 
   )
