@@ -9,9 +9,8 @@
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
-    [cz.holyjak.rad.database-adapters.asami.util :refer [ensure! ref? to-one?]]
-    [taoensso.timbre :as log]
-    [cz.holyjak.rad.database-adapters.asami.util :as util]))
+    [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure! ref? to-one?]]
+    [taoensso.timbre :as log]))
 
 (s/def ::attr/key->attribute map?)
 (s/def ::env (s/keys :req [::attr/key->attribute]))

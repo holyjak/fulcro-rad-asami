@@ -2,7 +2,29 @@
   "INTERNAL NS. Subject to change without warning."
   (:require
     [asami.core :as d]
-    [com.fulcrologic.rad.attributes :as attr]))
+    [cz.holyjak.rad.database-adapters.asami-options :as aso]
+    [com.fulcrologic.guardrails.core :refer [>defn =>]]
+    [com.fulcrologic.rad.attributes :as attr]
+    [taoensso.timbre :as log]))
+
+(>defn env->asami
+       "Find Asami from the Pathom env, optionally given a schema and whether required from connections or databases"
+       ([env schema asami-entry]
+        [map? keyword? keyword? => any?]
+        (or (cond
+              (= asami-entry aso/connections) (some-> (get-in env [asami-entry schema]))
+              (= asami-entry aso/databases) (some-> (get-in env [asami-entry schema]) deref))
+            (log/error (str "No "
+                            (if (= asami-entry aso/databases)
+                              "database atom"
+                              "connection")
+                            " for schema: " schema))))
+       ([env]
+        [map? => any?]
+        (env->asami env :production))
+       ([env schema]
+        [map? keyword? => any?]
+        (env->asami env schema aso/databases)))
 
 (defn ensure!
   ([x]
@@ -28,7 +50,7 @@
 
 (defn map-over-many-or-one [many? f v]
   (if many?
-    (map f v)
+    (mapv f v) ; BEWARE: Pathom3 requires that attribute values are not lazy sequences; breaks tests otherwise
     (f v)))
 
 (def q-ident->node-id
@@ -38,3 +60,10 @@
 
 (defn ident->node-id [db ident]
   (d/q q-ident->node-id db ident))
+
+(defn deep-merge
+  "Merges nested maps without overwriting existing keys."
+  [& xs]
+  (if (every? map? xs)
+    (apply merge-with deep-merge xs)
+    (last xs)))

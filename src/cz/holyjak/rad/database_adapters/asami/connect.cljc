@@ -1,4 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami.connect
+  "Establish connection to Asami"
   (:require
     [asami.core :as d]
     [asami.graph :as graph]
@@ -61,7 +62,14 @@
     (d/q '[:find ?e :where [?e :id [:duplicate-test/id :SAME]]] conn))
   ; => ([#a/n[24]] [#a/n[25]])
 
-  (d/entity dbm [:order/id 3])
+  @(d/transact dbm {:tx-data [{:id               [:person/id "ann"]
+                                :person/id        "ann"
+                                :person/addresses [{:address/id     "a-one"
+                                                    :address/street "First St."}
+                                                   {:address/id     "a-two"
+                                                    :address/street "Second St."}]}]})
+
+  (d/entity dbm [:person/id "ann"] false)
 
   (d/q '[:find ?e ?v
          :where [?e :account/id ?v] [?e ?a ?v]]

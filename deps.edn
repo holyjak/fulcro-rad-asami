@@ -2,7 +2,6 @@
 
  :deps    {org.clojars.quoll/asami {:mvn/version "2.3.2"}
            com.fulcrologic/fulcro-rad             {:mvn/version "1.4.0"} ; Note: We need Fulcro 3.5.3+ so default vals etc have correct diffs
-           com.wsscode/pathom                     {:mvn/version "2.4.0"}
            edn-query-language/eql                 {:mvn/version "1.0.1"}
            com.taoensso/encore                    {:mvn/version "3.1.0"}
            com.fulcrologic/guardrails             {:mvn/version "1.1.5"}
@@ -13,7 +12,11 @@
            org.clojure/clojurescript              {:mvn/version "1.11.54"} ; 1.11.54 adds update-vals
            org.clojure/clojure                    {:mvn/version "1.11.0"}}
 
- :aliases {:test      {:extra-paths ["test"]
+ :aliases {:pathom2 {:extra-deps {com.wsscode/pathom {:mvn/version "2.4.0"}
+                                  ;; NOTE: The following is pulled automatically by Pathom3 but not P2 yet we use it
+                                  com.wsscode/cljc-misc {:mvn/version "2022.03.07"}}}
+           :pathom3 {:extra-deps {com.wsscode/pathom3 {:mvn/version "2023.01.24-alpha"}}}
+           :test      {:extra-paths ["test"]
                        :jvm-opts ["-Dguardrails.enabled"
                                   "-XX:-OmitStackTraceInFastThrow" "-XX:MaxJavaStackTraceDepth=1000000"
                                   ;"-XX:+ShowCodeDetailsInExceptionMessages" ; see https://openjdk.java.net/jeps/358 - JDK 14+

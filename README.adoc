@@ -20,12 +20,16 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 ```clojure
 ;; in deps.edn:
 {:deps {cz.holyjak/fulcro-rad-asami {:git/url "https://github.com/holyjak/fulcro-rad-asami"
-                                     :sha "46b6f59643db171be0aa2b3bdc72806935f0ece4"}}}
+                                     :sha "46b6f59643db171be0aa2b3bdc72806935f0ece4"}
+        ;; pick ONE of Pathom v2 and Pathom3:
+        com.wsscode/pathom3 {:mvn/version "2023.01.24-alpha"}
+        ;com.wsscode/pathom {:mvn/version "2.4.0"}
+}}
 ```
 
-.Usage example code
+.Usage example code (Pathom 3)
 ```clojure
-(ns com.example.components.parser
+(ns com.example.components.parser ; Pathom 3
   (:require
     [com.example.model :as your-model]
     [com.fulcrologic.rad.attributes :as attr]
@@ -51,10 +55,48 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 
 ;; See examples of this in cz.holyjak.rad.database-adapters.asami-spec
 (def parser
+  (let [env-middleware (-> (attr/wrap-env all-attributes)
+                           (form/wrap-env save/middleware delete/middleware)
+                           (asami/wrap-env (fn [env] asami-connections))
+                           (blob/wrap-env bs/temporary-blob-store {:files         bs/file-blob-store
+                                                                   :avatar-images bs/image-blob-store}))]
+    (pathom3/new-processor {#_"your config here..."} env-middleware []
+      [automatic-resolvers your-model/custom-resolvers])))
+```
+
+.Usage example code (Pathom 2)
+```clojure
+(ns com.example.components.parser ; Pathom 2
+  (:require
+    [com.example.model :as your-model]
+    [com.fulcrologic.rad.attributes :as attr]
+    [com.fulcrologic.rad.form :as form]
+    [com.fulcrologic.rad.middleware.save-middleware :as r.s.middleware]
+    [com.fulcrologic.rad.pathom :as pathom]
+    [com.fulcrologic.rad.resolvers :as res]
+    [cz.holyjak.rad.database-adapters.asami :as asami]
+    [cz.holyjak.rad.database-adapters.asami-options :as aso]
+    [cz.holyjak.rad.database-adapters.asami.pathom :as asami.pathom))
+
+(def config {::asami/databases {:production {:asami/driver :local #_:mem, :asami/database "fulcro-rad-demo"}}})
+
+;; config should contain the key ::aso/databases, see start-connections docstring
+(def asami-connections (asami/start-connections config))
+
+(def automatic-resolvers
+  (vec
+    (concat
+      (res/generate-resolvers your-model/all-attributes)
+      (asami/generate-resolvers your-model/all-attributes :production))))
+
+(def save-middleware (r.s.middleware/wrap-rewrite-values (asami/wrap-save))) ; the wrap-rewrite-values is optional
+
+;; See examples of this in cz.holyjak.rad.database-adapters.asami-spec
+(def parser
     (pathom/new-parser {#_"your config here..."}
         [(attr/pathom-plugin all-attributes)
          (form/pathom-plugin save-middleware (asami/wrap-delete))
-         (asami/pathom-plugin (fn [env] asami-connections))]
+         (asami.pathom/pathom-plugin (fn [env] asami-connections))]
         [automatic-resolvers your-model/custom-resolvers]))
 ```
 
@@ -65,11 +107,44 @@ TIP: It is better to call `asami.core/shutdown` when shutting down the backend t
 
 === Tips
 
+==== Warning: beware inserting nested entities
+
+The generated id resolvers use `d/entity` to fetch the data - but this only works for top-level entities. Which is fine if you only use it with data inserted via save-form etc, which will break any data into quadruplets and insert even nested entities as top entities. But it breaks if you insert data manually, not using quadruplets, as in here:
+
+```clojure
+@(d/transact *conn* {:tx-data [{:id [::person/id "ann"]
+                                     ::person/id "ann"
+                                     ::person/addresses [{::address/id "a-one" ; <- nested entity!
+                                                          ::address/street "First St."}
+                                                         {::address/id "a-two"
+                                                          ::address/street "Second St."}]}]})
+```
+
+Here the addresses will become nested entities and `(d/entity *conn* [::address/id "a-one"])` will return `nil`. **FIXME**
+You can still get the data because `(d/entity *conn* [::person/id "ann"])` will return them (as of Asami 2.3.2 specifying `nested? false` has surprisingly no effect on that).
+
+NOTE: **WIP** The only problem is that https://clojurians.slack.com/archives/C87NB2CFN/p1674348472055449?thread_ts=1674176469.135179&cid=C87NB2CFN[in Pathom 3 v.2022.10.19-alpha this nested data is thrown away]. I'm currently looking into this
+
+[TIP]
+====
+To create multiple top-level entities using the entity tx form, this normally works:
+```clojure
+(d/transact conn {:tx-data [{:id [:address/id "a-one"]
+                             :address/id     "a-one"
+                             :address/street "First St."}
+                            {:id               [:person/id "ann"]
+                             :person/id        "ann"
+                             :person/addresses [{:id [:address/id "a-one"]}]}]})
+```
+====
+
 ==== Lookup refs
 
 When inserting data manually, remember to set `:id <ident>`. You can then use it as a lookup ref, e.g. in add: `[:db/add [:id <ident>] <prop> <val>]`.
 
 === Troubleshooting
+
+You can https://gist.github.com/holyjak/9951076cbaaac945be43cec98e2e41b0[find many great troubleshooting tips in my Pathom3 + Fulcro Lab Notes].
 
 ==== Enable debug logging
 
@@ -125,7 +200,7 @@ Not tested:
 
 === Testing
 
-Run tests: `clj -M:test:run-tests`
+Run tests: `clj -M:pathom3:test:run-tests`
 
 Also see the `(comment ..)` at the bottom of most `-spec` tests for running those in the REPL.
 
