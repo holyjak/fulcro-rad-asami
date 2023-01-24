@@ -109,24 +109,38 @@ TIP: It is better to call `asami.core/shutdown` when shutting down the backend t
 
 ==== Warning: beware inserting nested entities
 
-The generated id resolvers use `d/entity` to fetch the data - but this only works for top-level entities. Which is fine if you only use it with data inserted via save-form etc, which will break any data into quadruplets and insert even nested entities as top entities. But it breaks if you insert data manually, not using quadruplets, as in here:
+The generated id resolvers use `d/entity` to fetch the data. That has the effect of pulling the entity _and all nested entities_. Normally that is not a problem when you only insert data via save-form etc., because this will break any data into quadruplets and insert even nested entities as top entities. But if you insert data not as quadruplets but as an entity tree as here:
 
 ```clojure
 @(d/transact *conn* {:tx-data [{:id [::person/id "ann"]
                                      ::person/id "ann"
-                                     ::person/addresses [{::address/id "a-one" ; <- nested entity!
+                                     ::person/addresses [{:id [::address/id "a-one"] ; <- nested entity!
+                                                          ::address/id "a-one"
                                                           ::address/street "First St."}
-                                                         {::address/id "a-two"
+                                                         {:id [::address/id "a-two"]
+                                                          ::address/id "a-two"
                                                           ::address/street "Second St."}]}]})
 ```
 
-Here the addresses will become nested entities and `(d/entity *conn* [::address/id "a-one"])` will return `nil`. **FIXME**
-You can still get the data because `(d/entity *conn* [::person/id "ann"])` will return them (as of Asami 2.3.2 specifying `nested? false` has surprisingly no effect on that).
+then addresses will become _nested_ entities and `d/entity` will return person together with the whole value. (Notice that setting `nested?` to false on d/entity has no effect here - this option only makes sense with the value true for _references_ to other _top_ entities that you want to pulled whole).
 
-NOTE: **WIP** The only problem is that https://clojurians.slack.com/archives/C87NB2CFN/p1674348472055449?thread_ts=1674176469.135179&cid=C87NB2CFN[in Pathom 3 v.2022.10.19-alpha this nested data is thrown away]. I'm currently looking into this
+(Notice you can still fetch an address separately with `(d/entity *conn* [::address/id "a-one"])`, thanks to having set that `:id`.)
+
+NOTE: **WIP** A problem with pulling nested entities is that https://clojurians.slack.com/archives/C87NB2CFN/p1674348472055449?thread_ts=1674176469.135179&cid=C87NB2CFN[Pathom 3 v.2022.10.19-alpha apparently throws away this nested data]. I'm currently looking into this
 
 [TIP]
 ====
+To create multiple top-level entities using the entity tx form, this _might_ work (I have not tested it properly):
+```clojure
+(d/transact conn {:tx-data [{:id "a-one"
+                             :address/id     "a-one"
+                             :address/street "First St."}
+                            {:id               [:person/id "ann"]
+                             :person/id        "ann"
+                             :person/addresses [{:id "a-one"}]}]})
+```
+====
+
 To create multiple top-level entities using the entity tx form, this normally works:
 ```clojure
 (d/transact conn {:tx-data [{:id [:address/id "a-one"]
@@ -189,7 +203,7 @@ We store the full ident in the `:id` because we cannot be sure that the ID value
 Limitations and features that are not supported:
 
 * Currently, IDs must be of the type `uuid` and new entities need this set to a https://cljdoc.org/d/com.fulcrologic/fulcro/3.5.22/api/com.fulcrologic.fulcro.algorithms.tempid#tempid[`tempid`] so that the https://github.com/holyjak/fulcro-rad-asami/blob/main/src/cz/holyjak/rad/database_adapters/asami/write.cljc#L126-L130[entity is created before] being referred to and with https://github.com/holyjak/fulcro-rad-asami/blob/main/src/cz/holyjak/rad/database_adapters/asami/write.cljc#L67[correct attributes]
-* RAD Datomic-like https://github.com/fulcrologic/fulcro-rad-datomic/blob/f2d1535c5cc333de8fbb1a4649033dffc762072e/src/main/com/fulcrologic/rad/database_adapters/datomic_options.cljc#L5[native IDs] are not supported yet
+* RAD Datomic-like https://github.com/fulcrologic/fulcro-rad-datomic/blob/f2d1535c5cc333de8fbb1a4649033dffc762072e/src/main/com/fulcrologic/rad/database_adapters/datomic_options.cljc#L5[native IDs] are not supported yet (see parts of code marked with `FEAT-NAT-IDS` (incomplete), should we ever implement this)
 * https://github.com/fulcrologic/fulcro-rad/blob/fulcro-rad-1.2.7/src/main/com/fulcrologic/rad/attributes_options.cljc#L20[`ao/identities`] must have exactly one element
 
 Not tested:

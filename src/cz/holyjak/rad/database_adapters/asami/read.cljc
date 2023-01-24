@@ -13,73 +13,88 @@
     [asami.core :as d]))
 
 ;; ---------------------------------------------------------------------------------------------------------
-(defn- asami-ref->pathom
+(defn- asami-ref->pathom! ; x FEAT-NAT-IDS - for these, include the entity PK as meta on the entity? (-> e meta :asami/pk) = :<entity>/id ?
   "Translate Asami ref like `{:id val}` where val is for us always an ident into
   `{<ident prop> <ident val>}`, e.g. `{::address/id #uuid '123'}`"
-  [x]
+  [k v]
   (cond
     ;; If we get [:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]]
-    (and (vector? x) (= 2 (count x)) (= :id (first x)) (eql/ident? (second x)))
-    (->> x second (apply hash-map))
+    (and (vector? v) (= 2 (count v)) (= :id (first v)) (eql/ident? (second v)))
+    (->> v second (apply hash-map))
+
     ;; If we get {:id [::address/id #uuid "465d1920-0d3f-4dac-9027-d0bca986a6c8"]}
-    (and (map? x) (:id x) (= 1 (count x)) (eql/ident? (:id x)))
-    (->> x :id (apply hash-map))
+    (and (map? v) (:id v) #_(= 1 (count v)) (eql/ident? (:id v)))
+    (merge (dissoc v :id)
+           (->> v :id (apply hash-map)))
 
-    :else x))
+    :else (throw (ex-info "A ref attribute value does not contain `:id <ident>`"
+                          {:key k, :value v}))))
 
-(defn- transform-entity
+(defn transform-entity-property
+  "Adjust raw Asami data so that it is suitable for Pathom"
+  [{_ ::attr/key->attribute :as env} k v]
+  (let [pr-type            #(let [t (type %)] (if #?(:clj (class? t) :cljs false) (.getSimpleName t) (str t)))
+        to-many??          (to-many? env k)
+        ensure-ref-is-map! (fn [v-orig v']
+                             (let [ref-val (cond-> v' to-many?? first)
+                                   processed? (not= v' v-orig)]
+                               (assert (map? ref-val) ; could fail due to badly inserted data
+                                       (str "c.h.r.d.asami.read/transform-entity: The ref in the the to-"
+                                            (if to-many?? "many" "one")
+                                            " attr " k " should be a map (with :<?>/id) but it's type is "
+                                            (pr-type ref-val) " The whole " (when processed? "(adjusted) ")
+                                            "value of the attr is: "
+                                            (pr-str v') (when processed?
+                                                          (str " Its original value was " (pr-str v-orig)))))
+                               v'))]
+    ;; check
+    (when (and to-many?? (set? v) (= 1 (count v)) (vector? (first v)) (next (first v)) (map? (ffirst v)))
+      ;; We got st. like #{[{:x/id "1"}, ...]}, which indicates badly inserted data where the user wanted to
+      ;; insert multiple entities/refs but ended up with a single value of type vector instead
+      (throw (ex-info (str "Bad to-many attribute value inserted in the DB: Should have been multiple "
+                           " entities but is a single vector value containing these entities. Attr.: "
+                           k)
+                      {:attribute-key k, :attribute-value v})))
+    (cond-> v
+            (nil? v)
+            (do (log/warn "nil value in database for attribute" k) ; Note: Not sure that this can ever happen
+                v)
+
+            ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
+            ;; => unify to always be a vector
+            (and to-many??
+                 (not (set? v))
+                 (not (sequential? v)))
+            ;; A single value (a map or a primitive) => wrap in a sequence
+            (vector)
+
+            ;; Turn the to-many set returned by Asami for 2+ elements into vector b/c Pathom does not handle sets
+            to-many??
+            vec
+
+            ;; 1. Translate refs from Asami's {:id [<id prop> <val>]} to Pathom's {<id prop> <val>}
+            ;; 2. For nested child entities (created using the {} form of tx-data), transform recursively
+            (ref? env k) ; should always be a map for a ref *in theory*
+            (->> (ensure-ref-is-map! v) (util/map-over-many-or-one to-many?? (partial asami-ref->pathom! k))))))
+
+(defn transform-entity
   "Adjust raw Asami data so that it is suitable for Pathom"
   [{_ ::attr/key->attribute :as env} entity]
   {:pre [entity (::attr/key->attribute env)]}
-  (reduce-kv
-    (fn [m k v]
-      (let [pr-type #(let [t (type %)] (if #?(:clj (class? t) :cljs false) (.getSimpleName t) (str t)))
-            to-many?? (to-many? env k)
-            ensure-ref-is-map! (fn [v' v-orig]
-                                 (let [ref-val (cond-> v' to-many?? first)]
-                                   (assert (map? ref-val) ; could fail due to badly inserted data
-                                           (str "c.h.r.d.asami.read/transform-entity: The ref in the the to-"
-                                                (if to-many?? "many" "one")
-                                                " attr " k " should be a map (w/ :<?>/id) but it's type is "
-                                                (pr-type ref-val) " The whole (processed) value of the attr is: "
-                                                (pr-str v') (when (not= v' v-orig)
-                                                              (str " Its original value was " (pr-str v-orig)))))
-                                   v'))
-            _ (when (and to-many?? (set? v) (= 1 (count v)) (vector? (first v)) (next (first v)) (map? (ffirst v)))
-                ;; We got st. like #{[{:x/id "1"}, ...]}, which indicates badly inserted data where the user wanted to
-                ;; insert multiple entities/refs but ended up with a single value of type vector instead
-                (throw (ex-info (str "Bad to-many attribute value inserted in the DB: Should have been multiple "
-                                     " entities but is a single vector value containing these entities. Attr.: "
-                                     k)
-                                {:attribute-key k, :attribute-value v, :entity m})))
+  (reduce-kv (fn [m k v] (assoc m k (transform-entity-property env k v))) {}
+             ;; rm :id b/c it is an ident and the entity also has {<pk> pk-val} ; x FEAT-NAT-IDS
+             (dissoc entity :id)))
 
-            v' (cond-> v
-                       (nil? v)
-                       (do (log/warn "nil value in database for attribute" k) ; Note: Not sure that this can ever happen
-                           v)
+(comment
+  (transform-entity-property {::attr/key->attribute {:e/my-ref #::attr{:qualified-key :e/my-ref, :type :ref, :cardinality :many}}}
+                             :e/my-ref {:id [:entity/id 123]})
+ (transform-entity {::attr/key->attribute {:e/my-ref #::attr{:qualified-key :e/my-ref, :type :ref, :cardinality :many}}}
+                   {:e/random-val "str"
+                    :e/my-ref    {:id [:entity/id 123]}}))
 
-                       ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
-                       ;; => unify to always be a vector
-                       (and to-many??
-                            (not (set? v))
-                            (not (sequential? v)))
-                       ;; A single value (a map or a primitive) => wrap in a sequence
-                       (vector)
-
-                       ;; Turn the to-many set returned by Asami for 2+ elements into vector b/c Pathom does not handle sets
-                       to-many??
-                       vec
-
-                       ;; 1. Translate refs from Asami's {:id [<id prop> <val>]} to Pathom's {<id prop> <val>}
-                       ;; 2. For nested child entities (created using the {} form of tx-data), transform recursively
-                       (ref? env k) ; should always be a map for a ref *in theory*
-                       (ensure-ref-is-map! v))]
-        (assoc m k v')))
-    {}
-    (dissoc entity :id)))
 
 (defn- ids->entities
-  ([db qualified-key ids] (log/spy :info (ids->entities db qualified-key ids true)))
+  ([db qualified-key ids] (ids->entities db qualified-key ids false))
   ([db qualified-key ids nested?]
    ;; We require that each entity has `:id [:<entity>/id <id value>]` and thus use that for the lookup:
    ;; (if we supported native IDs then we could also (asami.graph/new-node long-id-value) but would need the
@@ -87,7 +102,7 @@
    (sequence
      ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
      ;; data of the child, we would need to pass the 3rd argument (nested?) as true
-     (comp (map #(d/entity db [qualified-key %] (if (= nested? false?) false true)))
+     (comp (map #(d/entity db [qualified-key %] nested?))
            (remove nil?)) ; note: remove nil? messes up with Pathom batching expecting the same number of results, with
                           ; id for the missing; fortunately P. provides a fn to fix it upstream, which we do
      ids)))
@@ -117,16 +132,16 @@
   "Query the database for an entity or entities. Uses the `id-attribute` to get the entity's id attribute name and the
   `input` that should contain the id(s) that need to be queried for (ex.: `{:order/id 1}` or `[{:order/id 1} ..]`).
   Returns the data in a Pathom-friendly way (i.e. to-many value becomes always a vector)."
-  [{_ ::attr/key->attribute ::asami/keys [fetch-nested? id-attribute] :as env}
+  [{_ ::attr/key->attribute ::asami/keys [id-attribute] :as env}
    input
    db]
   [map? ::id-map-or-maps any? => ::entity-or-entities]
-  (let [{::attr/keys [qualified-key]} id-attribute
+  (let [{::attr/keys [qualified-key] ::asami/keys [fetch-nested?]} id-attribute
         batch? (sequential? input)]
     (let [ids (if batch?
                 (into [] (keep qualified-key) input)
                 [(get input qualified-key)])
-          entities (ids->entities db qualified-key ids #_fetch-nested?) ; value of nested? seems to have no effect
+          entities (ids->entities db qualified-key ids fetch-nested?)
           result (sequence (map (partial transform-entity (select-keys env [::attr/key->attribute]))) entities)]
       (if batch?
         result
