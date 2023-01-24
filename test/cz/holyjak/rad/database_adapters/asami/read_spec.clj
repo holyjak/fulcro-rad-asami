@@ -1,12 +1,12 @@
 (ns cz.holyjak.rad.database-adapters.asami.read-spec
   (:require
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =fn=>]]
+    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =fn=> =throws=>]]
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.person :as person]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
-    [cz.holyjak.rad.database-adapters.asami.read :as common]
+    [cz.holyjak.rad.database-adapters.asami.read :as read]
     [fulcro-spec.core :refer [specification assertions]]
     [clojure.test :refer [use-fixtures]]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
@@ -29,6 +29,53 @@
     (tests)))
 
 (use-fixtures :each with-env)
+
+(defn ->attr
+  ([key] (->attr key false false))
+  ([key ref?] (->attr key ref? false))
+  ([key ref? many?]
+   (cond-> {::attr/qualified-key key}
+           ref? (assoc ::attr/type :ref)
+           many? (assoc ::attr/cardinality :many))))
+
+(specification "transform-entity"
+  (assertions
+    "To-one ref is transformed from using Asami's :id to using Pathom's <entity-id>"
+    (read/transform-entity {::attr/key->attribute {:e/one-ref (->attr :e/one-ref :ref)}}
+      {:e/one-ref {:id [:entity/id 123]}})
+    => {:e/one-ref {:entity/id 123}}
+    "To-many ref with a single value is transformed into a Pathom ref vector"
+    (read/transform-entity
+      {::attr/key->attribute {:e/many-ref-w-single-val (->attr :e/many-ref-w-single-val :ref :many)}}
+      {:e/many-ref-w-single-val {:id [:entity/id 123]}})
+    => {:e/many-ref-w-single-val [{:entity/id 123}]}
+    "To-many ref with a multiple values is transformed into a Pathom ref vector"
+    (update
+      (read/transform-entity
+       {::attr/key->attribute {:e/many-ref (->attr :e/many-ref :ref :many)}}
+       {:e/many-ref #{{:id [:entity/id 123]} {:id [:entity/id 456]}}})
+      :e/many-ref (partial sort-by :entity/id))
+    => {:e/many-ref [{:entity/id 123} {:entity/id 456} #_"Note: Order is irrelevant here"]}
+    "Non-ref singular attributes are left as-is"
+    (read/transform-entity
+      {::attr/key->attribute { ; also: :uuid, :symbol, :long, :int, :boolean, :enum
+                              :e/k #::attr{:qualified-key :e/k, :type :keyword}
+                              :e/str #::attr{:qualified-key :e/str, :type :string}
+                              :e/num #::attr{:qualified-key :e/num, :type :decimal}}}
+      {:e/k "kwd", :e/str "str", :e/num 1})
+    => {:e/k "kwd", :e/str "str", :e/num 1}
+    "A ref that is not a map fails"
+    (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
+                           {:e/bad-ref [:not :a :ref]})
+    =throws=> AssertionError
+    "A ref that lacks :id fails"
+    (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
+                           {:e/bad-ref {}})
+    =throws=> Exception
+    "A ref whose :id is not an ident fails" ; x FEAT-NAT-IDS
+    (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
+                           {:e/bad-ref {:id "not an ident"}})
+    =throws=> Exception))
 
 ;(specification "Pull query transform"
 ;               (component "pathom-query->asami-query"
