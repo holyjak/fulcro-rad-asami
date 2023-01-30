@@ -291,16 +291,21 @@
 
 (specification "save-form! tempid remapping"
                (let [tempid1 (tempid/tempid (ids/new-uuid 101)) ; NOTE These IDs must be unique in DB across tests, it seems
-                     tempid2 (tempid/tempid (ids/new-uuid 102))
+                     id2   (ids/new-uuid 102)
+                     tempid2 (tempid/tempid id2)
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
                               [::address/id tempid2] {::address/street {:after "A1 St"}}}
-                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})]
+                     {:keys [tempids] :as X} (asami-pathom-common/save-form! *env* {::form/delta delta})]
                  (assertions
+                   "Returns tempid remappings"
+                   tempids =fn=> not-empty
                    ;"Returns a native ID remap for entity using native IDs"
                    ;(pos-int? (get tempids tempid1)) => true
                    "Returns a non-native ID remap for entity using uuid IDs"
-                   (uuid? (get tempids tempid2)) => true)))
+                   (uuid? (get tempids tempid2)) => true
+                   "Tempid mapped correctly"
+                   (get tempids tempid2) => id2)))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; delete!

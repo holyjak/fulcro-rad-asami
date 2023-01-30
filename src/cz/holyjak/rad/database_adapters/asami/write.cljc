@@ -2,7 +2,9 @@
   "Support for turning form deltas into Asami transactions etc."
   (:require
     [asami.core :as d]
+    [asami.entities :as entities]
     [asami.graph :as graph]
+    [asami.storage :as storage]
     [clojure.set :as set]
     [clojure.spec.alpha :as s]
     [com.fulcrologic.guardrails.core :refer [>defn =>]]
@@ -15,8 +17,39 @@
 (s/def ::attr/key->attribute map?)
 (s/def ::env (s/keys :req [::attr/key->attribute]))
 
+(defn transact-generated
+  "EXPERIMENTAL. Like asami.core/transact but first generates the _tx-data_ (sequence of triplets)
+   via `(tx-generator-fn graph)`. The generator is run when it has exclusive access to the storage,
+   i.e. no other transaction will change the DB in the meantime.
+
+   Based on simplified and extended code of `asami.core/transact` does.
+
+   BEWARE: The DB is locked while `tx-generator-fn` runs so make it fast."
+  [connection tx-generator-fn]
+  ;; Detached databases need to be reattached when transacted into
+  (d/check-attachment connection)
+
+  (let [vtempids       (volatile! {}) ;; volatile to capture the tempid map from built-triples
+        generated-data (volatile! [[] []]) ;; volatile to capture the asserted and retracted data in a transaction
+        [db-before db-after]
+        (storage/transact-update
+          connection
+          (fn [graph tx-id]
+            (let [tx-data-seq (util/ensure! (tx-generator-fn graph) (some-fn nil? sequential?)
+                                            "tx-generator-fn must produce a sequence of data (maps/triples)")
+                  [asserts retracts tempids] (entities/build-triples graph tx-data-seq)]
+              (vreset! vtempids tempids)
+              (graph/graph-transact graph tx-id asserts retracts generated-data))))
+
+        ;; pull out the info captured during the transaction
+        [triples retracts] (deref generated-data)]
+    {:db-before db-before
+     :db-after  db-after
+     :tx-data   (concat retracts triples)
+     :tempids   @vtempids}))
+
 (defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
-  "The attribute belongs to the current schema (= DB) and is a normal proerty, i.e. not the ID"
+  "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
   [{::attr/keys [key->attribute]} target-schema k]
   (let [{:keys [::attr/schema]
          ::attr/keys [identity?]} (key->attribute k)]
@@ -40,8 +73,10 @@
   Hopefully RAD handles removing those."
   ;; Perhaps add an attribute flag telling us what entities cannot exist on their own and only have 1 parent and thus
   ;; should be deleted?
-  [db ident->singular-props]
-  (let [graph (d/graph db)]
+  [graph-or-db ident->singular-props]
+  (let [graph (if (satisfies? graph/Graph graph-or-db)
+                graph-or-db
+                (d/graph graph-or-db))]
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
          not-empty)))
 
@@ -203,8 +238,8 @@
 
 (defn delta->txn-with-retractions
   "Like [[delta->txn]] but includes retractions for all involved singular attributes."
-  [{::attr/keys [key->attribute] :as env} db schema delta]
+  [{::attr/keys [key->attribute] :as env} graph schema delta]
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
-                         (clear-singular-attributes-txn db))
+                         (clear-singular-attributes-txn graph))
         changes  (delta->txn* env schema delta)]
     (update changes :txn (partial concat retractions))))

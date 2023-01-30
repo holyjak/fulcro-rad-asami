@@ -37,31 +37,42 @@
 (defn save-form!
   "Do all the possible operations for the given form delta (save to the database involved)"
   [env {::form/keys [delta] :as _save-params}]
-  (let [schemas (dups/schemas-for-delta env delta)
-        result (volatile! {:tempids {}})]
-    (log/debug "Saving form across " schemas)
-    (doseq [schema schemas
-            :let [connection (util/env->asami env schema aso/connections)
-                  ;; NOTE: tempid = Fulcro tempid;
-                  ;;       generated-id = the (uu)id that we generated as the ID of the new entity
-                  {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions env (d/db connection) schema delta)]]
+  (let [schemas (dups/schemas-for-delta env delta)]
+    (when (next schemas) (log/debug "Saving form across " schemas))
+    {:tempids
+     (->>
+       (for [schema schemas
+             :let [connection (or (util/env->asami env schema aso/connections)
+                                  (do (log/error "Unable to save form: connection is missing in env for schema "
+                                                 schema "; has: " (keys (get env aso/connections)))
+                                      nil))]
+             :when connection]
+         (try
+           (log/debug "Saving form delta" (with-out-str (pprint delta)) "on schema" schema)
+           (let [database-atom (get-in env [aso/databases schema])
 
-      (log/debug "Saving form delta" (with-out-str (pprint delta)) "on schema" schema)
-      (if (and connection (seq txn))
-        (try
-          (log/debug "Running txn\n" (with-out-str (pprint txn)))
-          (let [database-atom (get-in env [aso/databases schema])]
-            @(d/transact connection txn)
-            (some-> database-atom (reset! (d/db connection)))
-            (vswap! result update :tempids merge tempid->generated-id))
-          (catch #?(:clj Exception :cljs :default) e
-            (log/error e "Transaction failed!")
-            {}))
-        (log/error "Unable to save form:"
-                   (cond
-                     (not connection) (str "connection is missing in env for schema " schema "; has: " (keys (get env aso/connections)))
-                     (empty? txn) "the transaction is empty"))))
-    @result))
+                 ;; NOTE: tempid = Fulcro tempid;
+                 ;;       generated-id = the (uu)id that we generated as the ID of the new entity
+                 vtempid->generated-id (volatile! {})
+
+                 ;; here tempids are [:id <ident>] -> node-id but we want tempid->ident
+                 {:keys [db-after #_tempids]}
+                 (write/transact-generated
+                   connection
+                   (fn [graph]
+                     (let [{:keys [tempid->generated-id txn]}
+                           (write/delta->txn-with-retractions env graph schema delta)]
+                       (if (seq txn)
+                         (log/debug "Running txn\n" (with-out-str (pprint txn)))
+                         (log/error "Unable to save form: the transaction is empty"))
+                       (vreset! vtempid->generated-id tempid->generated-id)
+                       txn)))]
+             (some-> database-atom (reset! db-after))
+             @vtempid->generated-id)
+           (catch #?(:clj Exception :cljs :default) e
+             (log/error e "Transaction failed!")
+             nil)))
+       (apply merge))}))
 
 (defn wrap-save
   "Form save middleware to accomplish saves."
