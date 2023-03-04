@@ -68,13 +68,17 @@
     (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
                            {:e/bad-ref [:not :a :ref]})
     =throws=> AssertionError
-    "A ref that lacks :id fails"
-    (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
-                           {:e/bad-ref {}})
-    =throws=> Exception
-    "A ref whose :id is not an ident fails" ; x FEAT-NAT-IDS
+    "A ref whose :id is not an ident fails" ; x FEAT-NAT-IDS ; FIXME change for deleted entities
     (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
                            {:e/bad-ref {:id "not an ident"}})
+    =throws=> Exception
+    "A ref whose target entity has been deleted"
+    (read/transform-entity {::attr/key->attribute {:e/deleted-ref (->attr :e/deleted-ref :ref)}}
+                           {:e/deleted-ref {}})
+    => {:e/deleted-ref nil}
+    "A ref that lacks :id fails"
+    (read/transform-entity {::attr/key->attribute {:e/bad-ref (->attr :e/bad-ref :ref)}}
+                           {:e/bad-ref {:some-non-id-attr 123}})
     =throws=> Exception))
 
 ;(specification "Pull query transform"

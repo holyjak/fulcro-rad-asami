@@ -128,7 +128,16 @@
                                    ::person/nicks ["Bobby"],
                                    ::person/full-name "Bob",
                                    ::person/addresses [{::address/street "Oslo St."}]
-                                   ::person/primary-address {::address/street "Oslo St."}}})))
+                                   ::person/primary-address {::address/street "Oslo St."}}}
+          "An existing entity referring to a deleted entity"
+          (let [_ (asami-pathom-common/delete-entity! *env* (apply hash-map a1))]
+            (parser {} [{[::person/id "bob"] [::person/id ::person/full-name
+                                              {::person/addresses [::address/street]}
+                                              {::person/primary-address [::address/street]}]} ])
+            ) => {[::person/id "bob"] {::person/id "bob"
+                                                 ::person/full-name "Bob",
+                                                 ::person/addresses []
+                                                 ::person/primary-address nil}})))
     (component "child entities"
       ;; Use the entity form of tx, which permits specifying nested, dependent entities:
       @(d/transact *conn* {:tx-data [{:id [::address/id "a-one"]
@@ -314,11 +323,17 @@
 (specification "delete!"
   (let [addr-id (ids/new-uuid 101)
         addr-ident [::address/id addr-id]
-        _ @(d/transact *conn* (conj (write/new-entity-ident->tx-data addr-ident)
+        {db0 :db-after}
+        @(d/transact *conn* (conj (write/new-entity-ident->tx-data addr-ident)
                                     [:db/add [:id addr-ident] ::address/street "X St"]))
         _ (asami-pathom-common/delete-entity! *env* {::address/id addr-id})
         db (d/db *conn*)]
     (assertions
+      "Entity existed"
+      (query/entities
+        {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::address/id}}
+        {::address/id addr-id}
+        db0) => #::address{:id addr-id :street "X St"} ; Note `:id <ident>` b/c query/entities drops it
       "Entity exists no more"
       (query/entities
         {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::address/id}}

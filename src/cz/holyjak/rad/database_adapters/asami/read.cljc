@@ -27,6 +27,10 @@
     (merge (dissoc v :id)
            (->> v :id (apply hash-map)))
 
+    ;; We get an empty map when the target entity of the ref has been deleted from the DB
+    (= v {})
+    nil
+
     :else (throw (ex-info "A ref attribute value does not contain `:id <ident>`"
                           {:key k, :value v}))))
 
