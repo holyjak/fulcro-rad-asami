@@ -1,4 +1,3 @@
-#_:clj-kondo/ignore
 (ns potemkin.namespaces
   (:require [clj-kondo.hooks-api :as api]))
 

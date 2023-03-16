@@ -156,6 +156,12 @@ To create multiple top-level entities using the entity tx form, this normally wo
 
 When inserting data manually, remember to set `:id <ident>`. You can then use it as a lookup ref, e.g. in add: `[:db/add [:id <ident>] <prop> <val>]`.
 
+==== Utilities for generating transactions
+
+Use functions such as `write/retract-entity-txn` and `write/delta->txn-map-with-retractions`
+if you want to make transactions to delete or update entities in a way consistent with
+RAD-managed entities.
+
 === Troubleshooting
 
 You can https://gist.github.com/holyjak/9951076cbaaac945be43cec98e2e41b0[find many great troubleshooting tips in my Pathom3 + Fulcro Lab Notes].

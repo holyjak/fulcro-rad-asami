@@ -73,7 +73,7 @@
         delta {[::address/id id] {::address/id id
                                   ::address/street {:before "111 Main" :after "111 Main St"}}}]
 
-    (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [tempid->txid txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->txid) => true
@@ -83,7 +83,7 @@
         (runnable? txn) => true))
     (let [delta {[::address/id id] {::address/id id
                                     ::address/enabled? {:before nil :after false}}}]
-      (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+      (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
         (assertions
           "setting boolean false does an add"
           txn => [[:db/add ref ::address/enabled? false]])))
@@ -91,7 +91,7 @@
           delta {[::address/id id] {::address/id id
                                     ::address/enabled? {:before false :after nil}}}]
       (tap> (d/q '[:find ?e ?a ?v :where [?e ?a ?v] [?e ::address/id]] db'))
-      (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db' :production delta)]
+      (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db' :production delta)]
         (assertions
           "removing boolean false does a retract"
           txn => [[:db/retract node-id ::address/enabled? false]])))))
@@ -101,7 +101,7 @@
         ref [:id [::address/id id]]
         {db :db-after} @(d/transact *conn* (write/new-entity-ident->tx-data [::address/id id]))
         delta {[::address/id id] {::address/street {:after "111 Main St"}}}]
-    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "Includes lookup refs for the non-native ID, and changes for the facts that changed"
         txn => [[:db/add ref ::address/street "111 Main St"]]
@@ -115,7 +115,7 @@
         node-id (util/ident->node-id db (second ref))
         delta {[::address/id id] {::address/id id
                                   ::address/street {:before "111 Main" :after nil}}}]
-    (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [tempid->txid txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "has no tempid mappings"
         (empty? tempid->txid) => true
@@ -129,7 +129,7 @@
                          str-id (str (:id id1))
                          delta {[::person/id id1] {::person/id {:after id1}
                                                    ::person/email {:after "joe@nowhere.com"}}}]
-                     (let [{:keys [tempid->txid txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [tempid->txid txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "includes tempid temporary mapping"
                          (get tempid->txid id1) => -1
@@ -142,7 +142,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/email {:after "joe@nowhere.net"}}}]
-                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/email "joe@nowhere.net"]]
@@ -153,7 +153,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/full-name {:before "Bob" :after "Bobby"}}}]
-                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/full-name "Bobby"]]
@@ -164,7 +164,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/full-name {:before "Bob"}}}]
-                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/retract id ::person/full-name "Bob"]]
@@ -180,7 +180,7 @@
                    (let [{{:strs [id]} :tempids} @(d/transact *conn* [{:db/id "id"
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/role {:after :admin}}}]
-                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/add id ::person/role :admin]]
@@ -192,7 +192,7 @@
                                                                        ::person/role :admin
                                                                        ::person/full-name "Bob"}])
                          delta {[::person/id id] {::person/role {:before :admin}}}]
-                     (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+                     (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
                        (assertions
                          "Includes simple add based on real datomic ID"
                          txn => [[:db/retract id ::person/role :admin]]
@@ -211,7 +211,7 @@
         delta {[::person/id id] {::person/id id
                                  ::person/permissions {:before [:read :write]
                                                        :after [:read :execute :write]}}}]
-    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "Includes simple add of the added value"
         txn => [[:db/add ref ::person/permissions :execute]]
@@ -226,7 +226,7 @@
                                     [:db/add ref ::person/permissions [:read :write]]))
         delta {[::person/id id] {::person/permissions {:before [:read :write]
                                                        :after [:execute]}}}]
-    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "Includes simple add based on real datomic ID"
         (set txn) => #{[:db/add ref ::person/permissions :execute]
@@ -271,7 +271,7 @@
                    [:db/add [:id [::address/id new-address-id2]] ::address/id new-address-id2]
                    [:db/add [:id [::address/id new-address-id2]] :a/entity true]
                    [:db/add [:id [::address/id new-address-id2]] ::address/street "B St"]}]
-    (let [{:keys [txn]} (write/delta->txn-with-retractions *env* (d/db *conn*) :production delta)]
+    (let [{:keys [txn]} (write/delta->txn-map-with-retractions *env* (d/db *conn*) :production delta)]
       (assertions
         "Adds the non-native IDs, and the proper values"
         (set/difference (set txn) expected) => #{}
@@ -291,7 +291,7 @@
         delta {person-ident {::person/primary-address {:after [::address/id new-address-tempid]}}
                [::address/id new-address-tempid] {::address/id new-address-tempid
                                                   ::address/street {:after "B St"}}}]
-    (let [{:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+    (let [{:keys [tempid->generated-id txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
       (assertions
         "Returns tempid mappings"
         tempid->generated-id => {new-address-tempid new-address-id}
@@ -318,7 +318,7 @@
                                                  :after [[::address/id orig-address-id1] [::address/id new-addr-tempid]]}}
                [::address/id new-addr-tempid] {::address/id new-addr-tempid
                                                ::address/street {:after "B St"}}}
-        {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+        {:keys [tempid->generated-id txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
     (assertions
       "Includes remappings for new entities"
       tempid->generated-id => {new-addr-tempid new-addr-id}
@@ -348,7 +348,7 @@
                                                  :after [[::address/id new-address-tempid1]]}}
                [::address/id new-address-tempid1] {::address/id new-address-tempid1
                                                    ::address/street {:after "B St"}}}
-        {:keys [tempid->generated-id txn]} (write/delta->txn-with-retractions *env* db :production delta)]
+        {:keys [tempid->generated-id txn]} (write/delta->txn-map-with-retractions *env* db :production delta)]
     (assertions
       "Includes remappings for new entities"
       tempid->generated-id => {new-address-tempid1 new-address-id1}
@@ -372,7 +372,7 @@
                                               ::person/addresses {:after [[::address/id address-tempid]]}}
                  [::address/id address-tempid] {::address/id address-tempid
                                                 ::address/street {:after "B St"}}}
-          {:keys [txn]} (write/delta->txn-with-retractions *env* (d/db *conn*) :production delta)
+          {:keys [txn]} (write/delta->txn-map-with-retractions *env* (d/db *conn*) :production delta)
           {db :db-after} @(d/transact *conn* txn)
           person (query/entities
                    {::attr/key->attribute key->attribute

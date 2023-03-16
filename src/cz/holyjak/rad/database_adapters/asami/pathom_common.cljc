@@ -61,10 +61,10 @@
                    connection
                    (fn [graph]
                      (let [{:keys [tempid->generated-id txn]}
-                           (write/delta->txn-with-retractions env graph schema delta)]
+                           (write/delta->txn-map-with-retractions env graph schema delta)]
                        (if (seq txn)
                          (log/debug "Running txn\n" (with-out-str (pprint txn)))
-                         (log/error "Unable to save form: the transaction is empty"))
+                         (log/error "Unable to save form: the transaction is empty for delta =" delta))
                        (vreset! vtempid->generated-id tempid->generated-id)
                        txn)))]
              (some-> database-atom (reset! db-after))

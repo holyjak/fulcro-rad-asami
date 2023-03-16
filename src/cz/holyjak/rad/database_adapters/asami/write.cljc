@@ -56,7 +56,13 @@
     (and (= schema target-schema) (not identity?))))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
-  (if-let [node-id (ffirst (graph/resolve-triple graph '?n :id ident))]
+  (if-let [node-id (try (ffirst (graph/resolve-triple graph '?n :id ident))
+                        (catch #?(:clj ClassCastException :cljs :default) e
+                          (throw (ex-info (str "Finding Asami node with :id " (pr-str ident)
+                                               " failed. Possibly there is a type mismatch between"
+                                               " its value and the corresponding DB value. (Did you"
+                                               " forget #uuid ?) Error: " (ex-message e))
+                                          {:ident ident}))))]
     (for [prop singular-props
           :let [existing-val (ffirst (ensure!
                                        (graph/resolve-triple graph node-id prop '?xval)
@@ -107,11 +113,19 @@
         persistent!
         not-empty)))
 
+(defn retract-entity-txn
+  "Return the transaction data to retract a (flat) entity from the DB, given its ident.
+
+  BEWARE: Until https://github.com/quoll/asami/issues/5 is fixed, you might need to retract ID
+          attributes separately in a subsequent transaction."
+  [db ident]
+  (d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
+       db ident))
+
 (defn retract-entity
   "Retract a (flat) entity from the DB, given the value of its `:id` attribute. Returns same as `d/transact`"
   [conn id]
-  (let [retract-txn (d/q '[:find :db/retract ?e ?a ?v :where [?e ?a ?v] [?e :id ?id] :in $ ?id]
-                         (d/db conn) id)
+  (let [retract-txn (retract-entity-txn (d/db conn) id)
         retract-id (first (filter #(= :id (nth % 2)) retract-txn))
         _ (log/debug "Retracting entity `" (pr-str id) "` with:" (vec retract-txn))
         res1 (d/transact conn retract-txn)
@@ -136,7 +150,7 @@
                        :else (throw (ex-info "Only unwrapping of tempid/uuid is supported" {:id suggested-id})))
       :otherwise (throw (ex-info "Don't know how to generate an ID for non-uuid ID attribute" {:attribute k})))))
 
-(defn create-tempid->generated-id [env delta]
+(defn ^:no-doc create-tempid->generated-id [env delta]
   (dups/tempids->generated-ids generate-id env delta))
 
 (defn asami-lookup-ref->ident
@@ -164,7 +178,7 @@
      [:db/add eid id-prop id-val]   ; add the external id itself
      [:db/add eid :a/entity true]])) ; mark it as standalone entity => only ref-ed, not inlined when fetching a parent one
 
-(defn prop->tx-data
+(defn ^:no-doc prop->tx-data
   "Add/remove the property's value(s) into/from Asami.
   For singular attributes, the value needs to be wrapped in a set.
   References are encoded in the way Asami expects."
@@ -196,7 +210,7 @@
   "Turn Fulcro delta for non-id attributes into Asami tx-data"
   [{:keys [tempid->real-id] :as env+} schema delta]
   (eduction
-    (mapcat (fn entity-delta->tx-data [[[_ id :as ident] entity-delta]]
+    (mapcat (fn entity-delta->tx-data [[ident entity-delta]]
               (let [eid (ident->asami-lookup-ref tempid->real-id ident)]
                 (eduction
                   (filter #(non-id-schema-prop? env+ schema (key %)))
@@ -204,20 +218,8 @@
                   entity-delta))))
     delta))
 
-(>defn delta->txn*
-  "Turn Fulcro form delta into an Asami update transaction. Example delta (only one entry):
-
-  {[:account/id #uuid \"ffffffff-ffff-ffff-ffff-000000000100\"]
-   {:account/active? {:before true, :after false}}}
-
-   Returns a map with three keys:
-    - `txn` - the Asami transactions themselves
-    - `tempid->generated-id` - mapping from Fulcro's tempids in delta to real, external IDs generated for the new entities
-
-   BEWARE: It does not retract existing values of singular attributes being updated/removed. It should not be used directly,
-   use [[delta->txn-with-retractions]] instead."
+(defn ^:no-doc  delta->txn*
   [env schema delta]
-  [::env keyword? map? => map?] ; TODO Specify what env keys we actually use
   (let [tempid->generated-id (create-tempid->generated-id env delta)
         ;;; For new entities being created, add the identifier attributes - the :<entity>/id <val> and :id <ident> ones:
         new-ids-txn (eduction
@@ -236,10 +238,21 @@
                     (assoc env :tempid->real-id tempid->generated-id)
                     schema delta)))}))
 
-(defn delta->txn-with-retractions
-  "Like [[delta->txn]] but includes retractions for all involved singular attributes."
-  [{::attr/keys [key->attribute] :as env} graph schema delta]
+(>defn delta->txn-map-with-retractions
+  "Turn Fulcro form delta into an Asami update transaction. Example delta (only one entry):
+
+  {[:account/id #uuid \"ffffffff-ffff-ffff-ffff-000000000100\"]
+   {:account/active? {:before true, :after false}}}
+
+   Returns a map with two keys:
+    - `txn` - the Asami transactions themselves
+    - `tempid->generated-id` - mapping from Fulcro's tempids in delta to real, external IDs generated for the new entities
+
+  The transactions will include retractions for all involved singular attributes; the delta's
+  `:before` value of such singular attributes is ignored."
+  [{::attr/keys [key->attribute] :as env} graph-or-db schema delta]
+  [::env  any? keyword? map? => map?] ; TODO Specify what env keys we actually use
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
-                         (clear-singular-attributes-txn graph))
+                         (clear-singular-attributes-txn graph-or-db))
         changes  (delta->txn* env schema delta)]
     (update changes :txn (partial concat retractions))))
