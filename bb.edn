@@ -1,0 +1,2 @@
+{:tasks {test (clojure "-M:pathom3:test:run-tests")
+         test-p2 (clojure "-M:pathom2:test:run-tests")}}

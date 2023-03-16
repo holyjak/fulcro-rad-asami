@@ -1,15 +1,12 @@
 (ns cz.holyjak.rad.database-adapters.asami.read-spec
   (:require
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =fn=> =throws=>]]
-    [com.fulcrologic.rad.ids :as ids]
+    [fulcro-spec.core :refer [specification assertions when-mocking => =fn=> =throws=>]]
     [cz.holyjak.rad.test-schema.person :as person]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami.read :as read]
-    [fulcro-spec.core :refer [specification assertions]]
-    [clojure.test :refer [use-fixtures]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
+    [clojure.test :refer [use-fixtures]]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
