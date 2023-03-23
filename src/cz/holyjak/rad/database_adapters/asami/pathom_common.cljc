@@ -114,7 +114,7 @@
   Its signature must be [resolve-sym qualified-key outputs resolver-fn transform]"
   [resolver-maker-fn
    _attributes
-   {::attr/keys [qualified-key schema] ::asami/keys [_fetch-nested? wrap-resolve] :as id-attribute}
+   {::attr/keys [qualified-key schema] ::asami/keys [_fetch-nested? wrap-resolve no-batch?] :as id-attribute}
    output-attributes]
   ;[::attr/attributes ::attr/attribute ::attr/attributes => ::pc/resolver]
   (let [transform nil ; not implemented (yet?)
@@ -135,4 +135,4 @@
                                          batch? (misc.coll/restore-order input qualified-key))))
                             wrap-resolve (wrap-resolve))]
     (log/info "Building ID resolver for" qualified-key "outputs" outputs)
-    (resolver-maker-fn resolve-sym qualified-key outputs resolver-fn transform)))
+    (resolver-maker-fn {:batch? (not no-batch?)} resolve-sym qualified-key outputs resolver-fn transform)))

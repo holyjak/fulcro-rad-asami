@@ -251,7 +251,7 @@
   The transactions will include retractions for all involved singular attributes; the delta's
   `:before` value of such singular attributes is ignored."
   [{::attr/keys [key->attribute] :as env} graph-or-db schema delta]
-  [::env  any? keyword? map? => map?] ; TODO Specify what env keys we actually use
+  [::env  any? keyword? map? => map?]
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
                          (clear-singular-attributes-txn graph-or-db))
         changes  (delta->txn* env schema delta)]

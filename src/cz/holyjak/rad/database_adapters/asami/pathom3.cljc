@@ -13,7 +13,7 @@
 
 (defn make-pathom3-resolver
   "Creates a pathom3 resolver, skipping the macro"
-  [resolve-sym qualified-key outputs resolve-fn transform-fn]
+  [{:keys [batch?] :as _opts} resolve-sym qualified-key outputs resolve-fn transform-fn]
   ; Note: rad-datomic uses macro lazy-invoke, because Pathom3 bottoms out on a defrecord
   ; called com.wsscode.pathom3.connect.operation/Resolver
   ; This requires invoking the resolver function.
@@ -21,7 +21,7 @@
   (pco/resolver
     (merge
       {::pco/op-name resolve-sym
-       ::pco/batch?  true
+       ::pco/batch?  batch?
        ::pco/input   [qualified-key]
        ::pco/output  outputs
        ::pco/resolve resolve-fn}

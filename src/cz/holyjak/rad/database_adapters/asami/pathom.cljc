@@ -12,13 +12,13 @@
 
 (defn make-pathom2-resolver
   "Creates a pathom2 resolver, skipping the macro"
-  [resolve-sym qualified-key outputs resolve-fn transform-fn]
+  [{:keys [batch?] :as _opts} resolve-sym qualified-key outputs resolve-fn transform-fn]
   (let [with-resolve-sym (fn [r]
                            (fn [env input]
                              (r (assoc env :com.wsscode.pathom.connect/sym resolve-sym) input)))]
     (cond-> {:com.wsscode.pathom.connect/sym     resolve-sym
              :com.wsscode.pathom.connect/output  outputs
-             :com.wsscode.pathom.connect/batch?  true
+             :com.wsscode.pathom.connect/batch?  batch?
              :com.wsscode.pathom.connect/resolve (with-resolve-sym resolve-fn)
              :com.wsscode.pathom.connect/input   #{qualified-key}}
             transform-fn transform-fn)))

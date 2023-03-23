@@ -18,7 +18,10 @@
                             (if (= asami-entry aso/databases)
                               "database atom"
                               "connection")
-                            " for schema: " schema))))
+                            " for schema: " schema)
+                       (if-let [ae (get env asami-entry)]
+                         (str "Known schemas: " (keys ae))
+                         (str "!!! Pathom env lacks " asami-entry " Present env keys: " (keys env))))))
        ([env]
         [map? => any?]
         (env->asami env :production))
