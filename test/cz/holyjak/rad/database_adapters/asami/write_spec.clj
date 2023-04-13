@@ -52,7 +52,7 @@
 (use-fixtures :once with-reset-database)
 (use-fixtures :each with-env)
 
-(specification "ident->props => retractions"
+(specification "ident->props => retractions" ; clear-singular-attributes-txn
   (let [pid (random-uuid)
         db (->> [{:id [:person/id pid]
                   :person/email "before@email.com"}]
@@ -179,8 +179,12 @@
          [::address/id id2] {::address/id     id2
                              ::address/street {:before "Fake" :after "New Street 1"}}})
       => {[::person/id pid] #{::person/email ::person/full-name ::person/primary-address ::person/role}
-          [::address/id id2] #{::address/street}}
-      )))
+          [::address/id id2] #{::address/street}})))
+
+#_
+(specification "delta->txn-map-with-retractions"
+  ; TODO
+  )
 
 (comment
   (do

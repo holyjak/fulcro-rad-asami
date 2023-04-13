@@ -53,6 +53,13 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
+(defattr qualities ::qualities :ref
+  {::attr/target      :cz.holyjak.rad.test-schema.person-quality/id
+   ;::asami/ownership? true
+   ::attr/cardinality :many
+   ::attr/schema      :production
+   ::attr/identities  #{::id}})
+
 (defattr things ::things :ref
   {::attr/target      :cz.holyjak.rad.test-schema.thing/id
    ::attr/cardinality :many
@@ -64,7 +71,7 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
-(def attributes [id full-name email nicks primary-address addresses role permissions things account-balance])
+(def attributes [id full-name email nicks primary-address addresses qualities role permissions things account-balance])
 
 (comment
   (defn entries->map

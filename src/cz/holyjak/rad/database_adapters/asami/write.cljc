@@ -48,12 +48,16 @@
      :tx-data   (concat retracts triples)
      :tempids   @vtempids}))
 
+(defn non-id-schema-attr?                                         ; copied from datomic-common + add docs, renamed
+  "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
+  [target-schema attr]
+  (let [{::attr/keys [identity? schema]} attr]
+    (and (= schema target-schema) (not identity?))))
+
 (defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
   "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
   [{::attr/keys [key->attribute]} target-schema k]
-  (let [{:keys [::attr/schema]
-         ::attr/keys [identity?]} (key->attribute k)]
-    (and (= schema target-schema) (not identity?))))
+  (non-id-schema-attr? target-schema (key->attribute k)))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
   (if-let [node-id (try (ffirst (graph/resolve-triple graph '?n :id ident))
@@ -86,13 +90,21 @@
     (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
          not-empty)))
 
-(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as env} schema entity-delta]
+(defn keep-attr-deltas
+  "Like core/keep on the seq of entity delta entries, but with the signature `(fn [rad-attribute {:keys [before after]}])`.
+  Notice the rad-attribute could be `nil`, e.g. if not properly registered with Pathom"
+  [attr-filter-fn key->attribute entity-delta]
+  (keep (fn [[attr-key attr-delta]] (attr-filter-fn (get key->attribute attr-key) attr-delta)) entity-delta))
+
+(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as _env} schema entity-delta]
   (->> entity-delta
-       (filter (fn [[k v]] (and (util/to-one? env k)
-                                (non-id-schema-prop? env schema k)
-                                (map? v)
-                                (contains? v :after))))
-       (map key)
+       (keep-attr-deltas (fn [attr attr-delta]
+                           (when (and (not (attr/to-many? attr))
+                                      (non-id-schema-attr? schema attr)
+                                      (map? attr-delta) ; being extra cautious here...
+                                      (contains? attr-delta :after))
+                             (::attr/qualified-key attr)))
+                            key->attribute)
        set
        not-empty))
 
