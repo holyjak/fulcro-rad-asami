@@ -15,13 +15,17 @@
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.person :as person]
+    [cz.holyjak.rad.test-schema.person-quality :as person-quality]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component => =check=> =fn=>]]
     [fulcro-spec.check :as _]
     [cz.holyjak.rad.database-adapters.asami.read :as query]))
 
-(def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
+(def all-attributes (vec (concat person/attributes
+                                 person-quality/attributes
+                                 address/attributes
+                                 thing/attributes)))
 (def key->attribute (into {}
                           (map (fn [{::attr/keys [qualified-key] :as a}]
                                  [qualified-key a]))
@@ -210,34 +214,34 @@
         id2 (ids/new-uuid 200)
         id3 (ids/new-uuid 300)]
     (component "A new entity referring to an existing one + update existing"
-               (let [expected-id (ids/new-uuid 100)
-                     tempid1 (tempid/tempid expected-id)
-                     delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
-                                                   ::person/full-name {:after "Bob"}
-                                                   ::person/primary-address {:after existing-addr-ident}
-                                                   ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
-                            existing-addr-ident {::address/id (second existing-addr-ident)
-                                                 ::address/street {:before "A St" :after "A1 St"}}}
-                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
-                     real-id (get tempids tempid1)
-                     person (query/entities
-                              {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
-                              {::person/id real-id}
-                              (d/db *conn*))]
-                 (assertions
-                   "Gives a proper remapping"
-                   (get tempids tempid1) =fn=> uuid?
-                   "Fulcro tempid is mapped to the uuid it wraps"
-                   (get tempids tempid1) => expected-id
-                   "Updates the db with non-ref attributes"
-                   person =check=> (_/embeds?*
-                                     {::person/id real-id
-                                      ::person/full-name "Bob"
-                                      ::person/role :cz.holyjak.rad.test-schema.person.role/admin
-                                      ;::person/primary-address {::address/street "A1 St"}
-                                      #_#_::person/primary-address {:id existing-addr-ident}})
-                   "Sets the ref to primary address (and entity-query returns it as the entity id)"
-                   (::person/primary-address person) => (apply hash-map existing-addr-ident))))
+      (let [expected-id (ids/new-uuid 100)
+            tempid1 (tempid/tempid expected-id)
+            delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
+                                          ::person/full-name {:after "Bob"}
+                                          ::person/primary-address {:after existing-addr-ident}
+                                          ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
+                   existing-addr-ident {::address/id (second existing-addr-ident)
+                                        ::address/street {:before "A St" :after "A1 St"}}}
+            {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
+            real-id (get tempids tempid1)
+            person (query/entities
+                     {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
+                     {::person/id real-id}
+                     (d/db *conn*))]
+        (assertions
+          "Gives a proper remapping"
+          (get tempids tempid1) =fn=> uuid?
+          "Fulcro tempid is mapped to the uuid it wraps"
+          (get tempids tempid1) => expected-id
+          "Updates the db with non-ref attributes"
+          person =check=> (_/embeds?*
+                            {::person/id real-id
+                             ::person/full-name "Bob"
+                             ::person/role :cz.holyjak.rad.test-schema.person.role/admin
+                             ;::person/primary-address {::address/street "A1 St"}
+                             #_#_::person/primary-address {:id existing-addr-ident}})
+          "Sets the ref to primary address (and entity-query returns it as the entity id)"
+          (::person/primary-address person) => (apply hash-map existing-addr-ident))))
     (component "Two new entities, one referring to another"
                (let [tempid2 (tempid/tempid id2)
                      tempid3 (tempid/tempid id3)
@@ -269,6 +273,7 @@
                    (::person/primary-address person) => {::address/id id3}
                    "Sets refs to addresses (and returns them as entity IDs)"
                    (::person/addresses person) => [(apply hash-map existing-addr-ident) {::address/id id3}])))
+
     (component "Update props and refs in entity (both to new & existing)"
                (let [id4 (ids/new-uuid 400), tempid4 (tempid/tempid id4)
                      delta {[::person/id id2] {::person/id id2
@@ -292,7 +297,55 @@
                                       ::person/full-name "June"
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/admin
                                       ::person/primary-address (apply hash-map existing-addr-ident)
-                                      ::person/addresses [(apply hash-map existing-addr-ident) {::address/id id4}]}))))))
+                                      ::person/addresses [(apply hash-map existing-addr-ident) {::address/id id4}]}))))
+    (component "owned entity"
+      (let [pid (ids/new-uuid 1)
+            qid (ids/new-uuid 2)
+            tpid (tempid/tempid pid)
+            tqid (tempid/tempid qid)
+            delta {[::person/id tpid] #::person{:id tpid
+                                                :qualities {:after [[::person-quality/id tqid]]}}
+                   [::person-quality/id tqid] #::person-quality{:id tqid
+                                                                :name {:after "bravery"}}}
+            _ (asami-pathom-common/save-form! *env* {::form/delta delta})]
+        (assertions
+          "the owner has a/owns pointed to the owned entity"
+          (d/q '[:find ?quality .
+                 :in $ ?pid
+                 :where
+                 [?person ::person/id ?pid]
+                 [?person :a/owns ?quality]] (d/db *conn*) pid) => :TODO
+          "an owned entity does not have a/entity"
+          (d/q '[:find [?name ?is-entity]
+                 :in $ ?qid
+                 :where
+                 [?quality ::person-quality/id ?qid]
+                 [?quality ::person-quality/name ?name]
+                 (optional [?quality :a/entity ?is-entity])]
+               (d/db *conn*) qid) => ["bravery" nil]
+          "An owned entity is created so that d/entity will include it in its parent"
+          (d/entity (d/db *conn*) [::person/id pid]) =check=> (_/embeds?*
+                                                                {::person/id pid
+                                                                 ::person/qualities [#::person-quality{:id qid :name "bravery"}]})
+          "owned entity is deleted when dropped from the owning attribute"
+          (do
+            (asami-pathom-common/save-form! *env* {::form/delta delta})
+            (d/q '[:find ?quality .
+                   :in $ ?qid
+                   :where [?quality ::person-quality/id ?qid]]
+                 (d/db *conn*) qid)) => nil
+          )))))
+
+(comment
+  (d/q '[:find ?quality ?a ?v
+         :in $ ?qid
+         :where
+         [?quality ::person-quality/id ?qid]
+         [?quality ?a ?v]
+         ;[?quality ::person-quality/name ?name]
+         ]
+       *D (ids/new-uuid 2))
+  )
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping

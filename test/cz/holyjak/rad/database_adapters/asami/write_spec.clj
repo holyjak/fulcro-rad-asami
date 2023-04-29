@@ -8,6 +8,7 @@
     [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =throws=>]]
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.person :as person]
+    [cz.holyjak.rad.test-schema.person-quality :as person-quality]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
@@ -103,23 +104,8 @@
 (specification "delta->singular-attrs-to-clear"
   (let [pid                 (ids/new-uuid 10)
         tempid             (tempid/tempid)
-
-        existing-addr-ident [::address/id (ids/new-uuid 1)]
         id1                 (ids/new-uuid 100)
-        id2                 (ids/new-uuid 200)
-        id3                 (ids/new-uuid 300)
-        id4                 (ids/new-uuid 400)
-        tempid4             (tempid/tempid id4)
-        delta               {[::person/id pid]      {::person/id              pid
-                                                     ::person/email           {:after "new@ma.il"}
-                                                     ::person/full-name       {:before "Jo" :after "June"}
-                                                     ::person/primary-address {:before [::address/id id3] :after existing-addr-ident}
-                                                     ;::person/addresses {:after [existing-addr-ident [::address/id tempid3]]}
-                                                     ::person/role            {:before :cz.holyjak.rad.test-schema.person.role/user
-                                                                               :after  :cz.holyjak.rad.test-schema.person.role/admin}}
-                             [::address/id tempid4] {::address/id     tempid4
-                                                     ::address/street {:after "C St"}}}]
-
+        id2                 (ids/new-uuid 200)]
     (assertions
       "ID excluded, despite being singular"
       (write/delta->singular-attrs-to-clear
@@ -181,7 +167,7 @@
       => {[::person/id pid] #{::person/email ::person/full-name ::person/primary-address ::person/role}
           [::address/id id2] #{::address/street}})))
 
-#_
+
 (specification "delta->txn-map-with-retractions"
   ; TODO
   )

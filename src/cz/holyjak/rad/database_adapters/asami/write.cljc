@@ -10,6 +10,7 @@
     [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
+    [cz.holyjak.rad.database-adapters.asami :as-alias asami]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure! ref? to-one?]]
     [taoensso.timbre :as log]))
@@ -57,7 +58,13 @@
 (defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
   "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
   [{::attr/keys [key->attribute]} target-schema k]
-  (non-id-schema-attr? target-schema (key->attribute k)))
+  (if-let [attr (key->attribute k)]
+    (non-id-schema-attr? target-schema attr)
+    (do
+      (log/warn "Encountered unknown attribute" k
+                "Is it properly registered with Pathom?"
+                "Known nr. attrs = " (count key->attribute))
+      nil)))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
   (if-let [node-id (try (ffirst (graph/resolve-triple graph '?n :id ident))
@@ -154,13 +161,20 @@
   "Generate an id for a new entity being  saved. You need to pass a `suggested-id` as a UUID or a tempid.
   If it is a tempid and the ID column is a UUID, then the UUID *from* the tempid will be used."
   [{::attr/keys [key->attribute] :as env} k suggested-id]
-  (let [{::attr/keys [type]} (key->attribute k)]
+  (let [{::attr/keys [type] :as attr} (key->attribute k)]
+    (when-not attr
+      (throw (ex-info (str "Couldn't find the attribute "
+                           k
+                           ", is it properly registered with Pathom?")
+                      {:attribute-name k,
+                       :known-attrs (keys key->attribute)})))
     (cond
       (= :uuid type) (cond
                        (tempid/tempid? suggested-id) (:id suggested-id)
                        (uuid? suggested-id) suggested-id    ; does this ever happen?
                        :else (throw (ex-info "Only unwrapping of tempid/uuid is supported" {:id suggested-id})))
-      :otherwise (throw (ex-info "Don't know how to generate an ID for non-uuid ID attribute" {:attribute k})))))
+      :else (throw (ex-info "Don't know how to generate an ID for non-uuid ID attribute"
+                            {:attribute-name k, :type type, :attr attr})))))
 
 (defn ^:no-doc create-tempid->generated-id [env delta]
   (dups/tempids->generated-ids generate-id env delta))
@@ -183,29 +197,36 @@
 (defn new-entity-ident->tx-data
   "Produce the tx-data for `d/transact` necessary to add a new entity - typically adding the ident's key and value as
   a property plus other required entity properties."
-  [[id-prop id-val :as ident]]
-  ;; NOTE: We assume tempids have been resolved and replaced with real ones by now
-  (let [eid (ident->asami-lookup-ref nil ident)]
-    [[:db/add eid :id ident] ; add the internal Asami :id prop
-     [:db/add eid id-prop id-val]   ; add the external id itself
-     [:db/add eid :a/entity true]])) ; mark it as standalone entity => only ref-ed, not inlined when fetching a parent one
+  ([ident] (new-entity-ident->tx-data nil ident))
+  ([key->attribute [id-prop id-val :as ident]]
+   ;; NOTE: We assume tempids have been resolved and replaced with real ones by now
+   (let [entity? (not (::asami/owned-entity? (get key->attribute id-prop)))
+         eid (ident->asami-lookup-ref nil ident)]
+     (cond-> [[:db/add eid :id ident] ; add the internal Asami :id prop
+              [:db/add eid id-prop id-val]]  ; add the external id itself
+             entity? (conj [:db/add eid :a/entity true]))))) ; mark it as standalone entity => only ref-ed, not inlined when fetching a parent one
 
 (defn ^:no-doc prop->tx-data
   "Add/remove the property's value(s) into/from Asami.
   For singular attributes, the value needs to be wrapped in a set.
   References are encoded in the way Asami expects."
-  [{:keys [tempid->real-id] :as env+} operation eid k vals]
-  (let [ref?? (ref? env+ k)]
-    (mapv (fn [v] [operation
-                   eid
-                   k
-                   (cond->> v
-                            ref?? (ident->asami-lookup-ref tempid->real-id))])
-          vals)))
+  [{:keys [attr/key->attribute tempid->real-id] :as env+} operation eid k vals]
+  (let [{::attr/keys [target type]} (get key->attribute k)
+        ref?? (= type :ref)
+        to-owned-entity? (and ref?? (::asami/owned-entity? (get key->attribute target)))
+        ref?? (ref? env+ k)]
+    (->> vals
+         (mapcat (fn [v]
+                   (let [real-id (when ref??
+                                   (ident->asami-lookup-ref tempid->real-id v))]
+                     (cond-> [[operation eid k (or real-id v)]]
+                             (and to-owned-entity? (= operation :db/add)) ; TODO Do we need to retract manually too
+                             (conj [:db/add eid :a/owns real-id])))))
+         (into []))))
 
 (defn prop-delta->tx-data
   "Turns a single delta for a single entity and property into transaction(s) (multiple if cardinality = many)"
-  [env+ eid k {:keys [before after] :as delta}] cat
+  [{::attr/keys [key->attribute] :as env+} eid k {:keys [before after] :as _delta}] cat
   ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
 
   (let [singular? (to-one? env+ k)
@@ -231,14 +252,14 @@
     delta))
 
 (defn ^:no-doc  delta->txn*
-  [env schema delta]
+  [{::attr/keys [key->attribute] :as env} schema delta]
   (let [tempid->generated-id (create-tempid->generated-id env delta)
         ;;; For new entities being created, add the identifier attributes - the :<entity>/id <val> and :id <ident> ones:
         new-ids-txn (eduction
                       ;; There are likely better ways to do this, e.g. checking (and (tempid/tempid? id) (uuid-ident? env ident))
                       (map (partial ident->asami-lookup-ref tempid->generated-id))
                       (filter (comp ::new? meta))
-                      (mapcat (comp new-entity-ident->tx-data asami-lookup-ref->ident))
+                      (mapcat (comp (partial new-entity-ident->tx-data key->attribute) asami-lookup-ref->ident))
 
                       (keys delta))]
     {:tempid->generated-id tempid->generated-id

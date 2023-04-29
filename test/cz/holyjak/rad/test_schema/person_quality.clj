@@ -1,4 +1,5 @@
 (ns cz.holyjak.rad.test-schema.person-quality
+  (:refer-clojure :exclude [name])
   (:require
     [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
@@ -6,7 +7,7 @@
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [taoensso.timbre :as log]))
 
-(defattr id ::id :uuid ;:long
+(defattr id ::id :uuid
   {::attr/identity? true
    ::attr/schema :production
    ::asami/owned-entity? true})

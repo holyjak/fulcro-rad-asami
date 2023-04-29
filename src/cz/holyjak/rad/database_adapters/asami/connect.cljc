@@ -50,9 +50,19 @@
   (d/create-database "asami:mem://test123")
   (def conn (d/connect "asami:mem://test123"))
   (->
-    @(d/transact conn {:tx-data [{:id [:person/id "person2"]}
-                                 [:db/add [:id [:person/id "person2"]] :person/full-name "Bob"]]})
+    ; only parent has :a/entity true, :a/owns <node>
+    @(d/transact conn {:tx-data [;; child
+                                 [:db/add :child/first :id :child/first]
+                                 [:db/add :child/first :child/name "Kiddy"]
+                                 ;; parent
+                                 [:db/add :parent/one :id :parent/one]
+                                 [:db/add :parent/one :parent/name "Father"]
+                                 [:db/add :parent/one :a/entity true]
+                                 [:db/add :parent/one :a/owns :child/first]
+                                 [:db/add :parent/one :parent/child :child/first]]})
     :tx-data)
+
+  (d/entity (d/db conn) :parent/one)
 
   (let [conn ...]
     @(d/transact conn {:tx-data [{:db/id -1 :id [:duplicate-test/id :SAME]}]})
