@@ -242,6 +242,7 @@
                              #_#_::person/primary-address {:id existing-addr-ident}})
           "Sets the ref to primary address (and entity-query returns it as the entity id)"
           (::person/primary-address person) => (apply hash-map existing-addr-ident))))
+
     (component "Two new entities, one referring to another"
                (let [tempid2 (tempid/tempid id2)
                      tempid3 (tempid/tempid id3)
@@ -307,14 +308,19 @@
                                                 :qualities {:after [[::person-quality/id tqid]]}}
                    [::person-quality/id tqid] #::person-quality{:id tqid
                                                                 :name {:after "bravery"}}}
-            _ (asami-pathom-common/save-form! *env* {::form/delta delta})]
+            _ (asami-pathom-common/save-form! *env* {::form/delta delta})
+            q-nodeid (ffirst (d/q '[:find ?q
+                                    :in $ ?qid
+                                    :where [?q ::person-quality/id ?qid]]
+                                  (d/db *conn*) qid))]
+
         (assertions
           "the owner has a/owns pointed to the owned entity"
           (d/q '[:find ?quality .
                  :in $ ?pid
                  :where
                  [?person ::person/id ?pid]
-                 [?person :a/owns ?quality]] (d/db *conn*) pid) => :TODO
+                 [?person :a/owns ?quality]] (d/db *conn*) pid) => q-nodeid
           "an owned entity does not have a/entity"
           (d/q '[:find [?name ?is-entity]
                  :in $ ?qid
@@ -326,26 +332,30 @@
           "An owned entity is created so that d/entity will include it in its parent"
           (d/entity (d/db *conn*) [::person/id pid]) =check=> (_/embeds?*
                                                                 {::person/id pid
-                                                                 ::person/qualities [#::person-quality{:id qid :name "bravery"}]})
+                                                                 ::person/qualities
+                                                                 ;; FIXME I get 1 even though it is to-many; bug?!
+                                                                 {:id [::person-quality/id qid]
+                                                                  ::person-quality/id qid
+                                                                  ::person-quality/name "bravery"}})
+          "TMP: Low-level check of owned entity retraction"
+          (set (write/orphaned-owned-entities-retraction-txn
+                 (d/db *conn*) key->attribute
+                 {[::person/id pid] #::person{:id pid
+                                              :qualities {:before [[::person-quality/id qid]] :after nil}}}))
+          => #{[:db/retract q-nodeid :id [::person-quality/id qid]]
+               [:db/retract q-nodeid ::person-quality/id qid]
+               [:db/retract q-nodeid ::person-quality/name "bravery"]}
+
           "owned entity is deleted when dropped from the owning attribute"
           (do
-            (asami-pathom-common/save-form! *env* {::form/delta delta})
+            (asami-pathom-common/save-form!
+              *env*
+              {::form/delta {[::person/id pid] #::person{:id pid
+                                                         :qualities {:before [[::person-quality/id qid]] :after nil}}}})
             (d/q '[:find ?quality .
                    :in $ ?qid
                    :where [?quality ::person-quality/id ?qid]]
-                 (d/db *conn*) qid)) => nil
-          )))))
-
-(comment
-  (d/q '[:find ?quality ?a ?v
-         :in $ ?qid
-         :where
-         [?quality ::person-quality/id ?qid]
-         [?quality ?a ?v]
-         ;[?quality ::person-quality/name ?name]
-         ]
-       *D (ids/new-uuid 2))
-  )
+                 (d/db *conn*) qid)) => nil)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping

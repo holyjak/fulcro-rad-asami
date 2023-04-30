@@ -2,10 +2,7 @@
   (:refer-clojure :exclude [name])
   (:require
     [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [cz.holyjak.rad.database-adapters.asami :as-alias asami]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [taoensso.timbre :as log]))
+    [cz.holyjak.rad.database-adapters.asami :as-alias asami]))
 
 (defattr id ::id :uuid
   {::attr/identity? true
