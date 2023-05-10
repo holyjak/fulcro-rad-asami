@@ -5,18 +5,16 @@
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure!]]
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =throws=>]]
+    [fulcro-spec.core :refer [specification assertions #_component #_behavior #_when-mocking => =throws=>]]
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.person :as person]
-    [cz.holyjak.rad.test-schema.person-quality :as person-quality]
+    ;[cz.holyjak.rad.test-schema.person-quality :as person-quality]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
-    [fulcro-spec.core :refer [specification assertions]]
     [clojure.test :refer [use-fixtures]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [asami.graph :as graph]))
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}

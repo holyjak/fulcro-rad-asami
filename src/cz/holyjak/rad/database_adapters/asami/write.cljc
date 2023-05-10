@@ -73,8 +73,9 @@
        (catch #?(:clj ClassCastException :cljs :default) e
          (throw (ex-info (str "Finding Asami node with :id " (pr-str ident)
                               " failed. Possibly there is a type mismatch between"
-                              " its value and the corresponding DB value. (Did you"
-                              " forget #uuid ?) Error: " (ex-message e))
+                              " its value and the corresponding DB value. (Are you"
+                              " passing a string where DB has an uuid <=> forget to"
+                              " prefix it with `#uuid` ?) Error: " (ex-message e))
                          {:ident ident})))))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
@@ -106,7 +107,8 @@
 
 (defn keep-attr-deltas
   "Like core/keep on the seq of entity delta entries, but with the signature `(fn [rad-attribute {:keys [before after]}])`.
-  Notice the rad-attribute could be `nil`, e.g. if not properly registered with Pathom"
+  Notice the rad-attribute could be `nil`, e.g. if not properly registered with Pathom.
+  Here, `entity-delta` is typically the map `{<qualified attr key> {:before .., :after ...}, ...}`."
   [attr-filter-fn key->attribute entity-delta]
   (keep (fn [[attr-key attr-delta]] (attr-filter-fn (get key->attribute attr-key) attr-delta)) entity-delta))
 
@@ -116,7 +118,7 @@
                            (when (and (not (attr/to-many? attr))
                                       (non-id-schema-attr? schema attr)
                                       (map? attr-delta) ; being extra cautious here...
-                                      (contains? attr-delta :after))
+                                      (contains? attr-delta :after)) ; notice the value could be nil => need contains?
                              (::attr/qualified-key attr)))
                             key->attribute)
        set
@@ -167,7 +169,7 @@
 (defn generate-id                                           ; based on ...database-adapters.key-value.pathom/unwrap-id
   "Generate an id for a new entity being  saved. You need to pass a `suggested-id` as a UUID or a tempid.
   If it is a tempid and the ID column is a UUID, then the UUID *from* the tempid will be used."
-  [{::attr/keys [key->attribute] :as env} k suggested-id]
+  [{::attr/keys [key->attribute] :as _env} k suggested-id]
   (let [{::attr/keys [type] :as attr} (key->attribute k)]
     (when-not attr
       (throw (ex-info (str "Couldn't find the attribute "
@@ -247,7 +249,7 @@
 
 (defn prop-delta->tx-data
   "Turns a single delta for a single entity and property into transaction(s) (multiple if cardinality = many)"
-  [{::attr/keys [key->attribute] :as env+} eid k attr-delta]
+  [{::attr/keys [#_key->attribute] :as env+} eid k attr-delta]
   ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
   (let [singular? (to-one? env+ k)
         [before after] (attr-delta->before+after-sets env+ k attr-delta)]

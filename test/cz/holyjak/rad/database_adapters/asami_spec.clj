@@ -61,10 +61,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn universal-parser [all-attributes all-resolvers]
-  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+  (if #_pathom3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))
     (let [env-middleware (-> (attr/wrap-env all-attributes)
                              (form/wrap-env (asami/wrap-save) (asami/wrap-delete))
-                             (asami/wrap-env (fn [env] {:production *conn*})))]
+                             (asami/wrap-env (fn [_env] {:production *conn*})))]
       ((requiring-resolve 'com.fulcrologic.rad.pathom3/new-processor) {} env-middleware [] all-resolvers))
     ((requiring-resolve 'com.fulcrologic.rad.pathom/new-parser)
       {}
@@ -91,7 +91,7 @@
 ;                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}]))))
 
 (defmacro universal-defresolver [name args config body]
-  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+  (if #_pathom3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))
     `(com.wsscode.pathom3.connect.operation/defresolver ~name ~args ~config ~body)
     `(do (require 'com.wsscode.pathom.connect)
          (com.wsscode.pathom.connect/defresolver
@@ -181,9 +181,9 @@
             cities {id1 "Oslo", id2 "Praha", id3 "Ash"}
             cities-backwards (reverse (seq cities))
             city (fn [[id name]] {:id [::address/city-id id] ::address/city-id id ::address/city-name name})
-            address (fn [idx city-id] {:id [::address/id (str "x" idx)]
-                                       ::address/id (str "x" idx)
-                                       ::address/city [:id [::address/city-id city-id]]})]
+            _address (fn [idx city-id] {:id [::address/id (str "x" idx)]
+                                        ::address/id (str "x" idx)
+                                        ::address/city [:id [::address/city-id city-id]]})]
         @(d/transact *conn* {:tx-data (mapv city cities)})
         (assertions
           "Output and input returned in the same order"
@@ -368,7 +368,7 @@
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
                               [::address/id tempid2] {::address/street {:after "A1 St"}}}
-                     {:keys [tempids] :as X} (asami-pathom-common/save-form! *env* {::form/delta delta})]
+                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})]
                  (assertions
                    "Returns tempid remappings"
                    tempids =fn=> not-empty
@@ -414,8 +414,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "Pathom parser integration (save + generated resolvers)"
-               (let [save-middleware     (asami/wrap-save)
-                     delete-middleware   (asami/wrap-delete)
+               (let [_save-middleware     (asami/wrap-save)
+                     _delete-middleware   (asami/wrap-delete)
                      automatic-resolvers (asami/generate-resolvers all-attributes :production)
                      parser (universal-parser all-attributes [automatic-resolvers form/resolvers])]
                  #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)

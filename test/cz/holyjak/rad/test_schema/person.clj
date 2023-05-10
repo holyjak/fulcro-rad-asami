@@ -1,9 +1,8 @@
 (ns cz.holyjak.rad.test-schema.person
   (:require
     [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [taoensso.timbre :as log]))
+    ;[cz.holyjak.rad.database-adapters.asami-options :as aso]
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
 
 (defattr id ::id :uuid ;:long
   {::attr/identity?                                         true
@@ -82,16 +81,16 @@
          (map #(apply hash-map %))
          (apply (partial merge-with into))))
 
-  (require '[cz.holyjak.rad.database-adapters.asami.write :as w] '[com.fulcrologic.fulcro.algorithms.tempid :as tempid])
-  (let [env {::attr/key->attribute (-> (group-by ::attr/qualified-key attributes) (update-vals first))}]
-    (->
-      (->> {::full-name "Bob"
-            ::permissions [:read :write]
-            ::things [[:thing/id :existing1]
-                      [:thing/id (tempid/tempid)]]}         ; FIXME the tempid is not moved out to the `true` part !!!
-           (mapcat (fn [[k vs :as entry]] (if (w/to-one? env k) [entry] (map #(vector k [%]) vs))))
-           (group-by (fn new-entity-ref? [[prop maybe-ident]]
-                       (boolean (and (w/ref? env prop) (tempid/tempid? (second maybe-ident)))))))
-      (update-vals entries->map)))
+  ;(require '[cz.holyjak.rad.database-adapters.asami.write :as w])
+  ;(let [env {::attr/key->attribute (-> (group-by ::attr/qualified-key attributes) (update-vals first))}]
+  ;  (->
+  ;    (->> {::full-name "Bob"
+  ;          ::permissions [:read :write]
+  ;          ::things [[:thing/id :existing1]
+  ;                    [:thing/id (tempid/tempid)]]}         ; FIXME the tempid is not moved out to the `true` part !!!
+  ;         (mapcat (fn [[k vs :as entry]] (if (w/to-one? env k) [entry] (map #(vector k [%]) vs))))
+  ;         (group-by (fn new-entity-ref? [[prop maybe-ident]]
+  ;                     (boolean (and (w/ref? env prop) (tempid/tempid? (second maybe-ident)))))))
+  ;    (update-vals entries->map)))
 
   )
