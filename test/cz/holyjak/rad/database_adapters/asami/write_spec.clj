@@ -168,9 +168,23 @@
           [::address/id id2] #{::address/street}})))
 
 
-(specification "delta->txn-map-with-retractions"
-  ; TODO
-  )
+;(specification "delta->txn-map-with-retractions"
+;  ;; NOTE This is also tested via the higher-level tests in asami-spec so
+;  ;;      we only focus on corner cases here
+;  (component "owned entity"
+;     (let [pid (ids/new-uuid 1)
+;           qid (ids/new-uuid 2)
+;           tpid (tempid/tempid pid)
+;           tqid (tempid/tempid qid)
+;           delta {[::person/id tpid] #:person{:id tpid
+;                                              :qualities {:after [[::person-quality/id tqid]]}}
+;                  [::person-quality/id tqid] #:person-quality{:id tqid :name "bravery"}}]
+;       ;; TO DO:
+;       ;; 1) create & verify d/entity includes the child; run Q to verify a/owns, no a/entity
+;       ;; 2) delete => child removed
+;       ()
+;       ))
+;  )
 
 (comment
   (do
