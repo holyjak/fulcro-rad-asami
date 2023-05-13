@@ -5,17 +5,16 @@
     [cz.holyjak.rad.database-adapters.asami-options :as aso]
     [cz.holyjak.rad.database-adapters.asami.connect :as asami-core]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure!]]
-    [fulcro-spec.core :refer [specification assertions component behavior when-mocking => =throws=>]]
+    [fulcro-spec.core :refer [specification assertions #_component #_behavior #_when-mocking => =throws=>]]
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.person :as person]
+    ;[cz.holyjak.rad.test-schema.person-quality :as person-quality]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami.write :as write]
-    [fulcro-spec.core :refer [specification assertions]]
     [clojure.test :refer [use-fixtures]]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [asami.graph :as graph]))
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
 
 (def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
 (def key->attribute (into {}
@@ -52,7 +51,7 @@
 (use-fixtures :once with-reset-database)
 (use-fixtures :each with-env)
 
-(specification "ident->props => retractions"
+(specification "ident->props => retractions" ; clear-singular-attributes-txn
   (let [pid (random-uuid)
         db (->> [{:id [:person/id pid]
                   :person/email "before@email.com"}]
@@ -103,23 +102,8 @@
 (specification "delta->singular-attrs-to-clear"
   (let [pid                 (ids/new-uuid 10)
         tempid             (tempid/tempid)
-
-        existing-addr-ident [::address/id (ids/new-uuid 1)]
         id1                 (ids/new-uuid 100)
-        id2                 (ids/new-uuid 200)
-        id3                 (ids/new-uuid 300)
-        id4                 (ids/new-uuid 400)
-        tempid4             (tempid/tempid id4)
-        delta               {[::person/id pid]      {::person/id              pid
-                                                     ::person/email           {:after "new@ma.il"}
-                                                     ::person/full-name       {:before "Jo" :after "June"}
-                                                     ::person/primary-address {:before [::address/id id3] :after existing-addr-ident}
-                                                     ;::person/addresses {:after [existing-addr-ident [::address/id tempid3]]}
-                                                     ::person/role            {:before :cz.holyjak.rad.test-schema.person.role/user
-                                                                               :after  :cz.holyjak.rad.test-schema.person.role/admin}}
-                             [::address/id tempid4] {::address/id     tempid4
-                                                     ::address/street {:after "C St"}}}]
-
+        id2                 (ids/new-uuid 200)]
     (assertions
       "ID excluded, despite being singular"
       (write/delta->singular-attrs-to-clear
@@ -179,8 +163,26 @@
          [::address/id id2] {::address/id     id2
                              ::address/street {:before "Fake" :after "New Street 1"}}})
       => {[::person/id pid] #{::person/email ::person/full-name ::person/primary-address ::person/role}
-          [::address/id id2] #{::address/street}}
-      )))
+          [::address/id id2] #{::address/street}})))
+
+
+;(specification "delta->txn-map-with-retractions"
+;  ;; NOTE This is also tested via the higher-level tests in asami-spec so
+;  ;;      we only focus on corner cases here
+;  (component "owned entity"
+;     (let [pid (ids/new-uuid 1)
+;           qid (ids/new-uuid 2)
+;           tpid (tempid/tempid pid)
+;           tqid (tempid/tempid qid)
+;           delta {[::person/id tpid] #:person{:id tpid
+;                                              :qualities {:after [[::person-quality/id tqid]]}}
+;                  [::person-quality/id tqid] #:person-quality{:id tqid :name "bravery"}}]
+;       ;; TO DO:
+;       ;; 1) create & verify d/entity includes the child; run Q to verify a/owns, no a/entity
+;       ;; 2) delete => child removed
+;       ()
+;       ))
+;  )
 
 (comment
   (do

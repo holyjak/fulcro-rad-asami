@@ -15,13 +15,17 @@
     [com.fulcrologic.rad.ids :as ids]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.person :as person]
+    [cz.holyjak.rad.test-schema.person-quality :as person-quality]
     [cz.holyjak.rad.test-schema.thing :as thing]
     [asami.core :as d]
     [fulcro-spec.core :refer [specification assertions component => =check=> =fn=>]]
     [fulcro-spec.check :as _]
     [cz.holyjak.rad.database-adapters.asami.read :as query]))
 
-(def all-attributes (vec (concat person/attributes address/attributes thing/attributes)))
+(def all-attributes (vec (concat person/attributes
+                                 person-quality/attributes
+                                 address/attributes
+                                 thing/attributes)))
 (def key->attribute (into {}
                           (map (fn [{::attr/keys [qualified-key] :as a}]
                                  [qualified-key a]))
@@ -57,10 +61,10 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (defn universal-parser [all-attributes all-resolvers]
-  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+  (if #_pathom3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))
     (let [env-middleware (-> (attr/wrap-env all-attributes)
                              (form/wrap-env (asami/wrap-save) (asami/wrap-delete))
-                             (asami/wrap-env (fn [env] {:production *conn*})))]
+                             (asami/wrap-env (fn [_env] {:production *conn*})))]
       ((requiring-resolve 'com.fulcrologic.rad.pathom3/new-processor) {} env-middleware [] all-resolvers))
     ((requiring-resolve 'com.fulcrologic.rad.pathom/new-parser)
       {}
@@ -87,7 +91,7 @@
 ;                            ::form/delta     delta}) [:tempids ::address/id ::address/street]}]))))
 
 (defmacro universal-defresolver [name args config body]
-  (if-let [p3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))]
+  (if #_pathom3? (try (require 'com.wsscode.pathom3.connect.operation) true (catch Exception _ false))
     `(com.wsscode.pathom3.connect.operation/defresolver ~name ~args ~config ~body)
     `(do (require 'com.wsscode.pathom.connect)
          (com.wsscode.pathom.connect/defresolver
@@ -177,9 +181,9 @@
             cities {id1 "Oslo", id2 "Praha", id3 "Ash"}
             cities-backwards (reverse (seq cities))
             city (fn [[id name]] {:id [::address/city-id id] ::address/city-id id ::address/city-name name})
-            address (fn [idx city-id] {:id [::address/id (str "x" idx)]
-                                       ::address/id (str "x" idx)
-                                       ::address/city [:id [::address/city-id city-id]]})]
+            _address (fn [idx city-id] {:id [::address/id (str "x" idx)]
+                                        ::address/id (str "x" idx)
+                                        ::address/city [:id [::address/city-id city-id]]})]
         @(d/transact *conn* {:tx-data (mapv city cities)})
         (assertions
           "Output and input returned in the same order"
@@ -210,34 +214,35 @@
         id2 (ids/new-uuid 200)
         id3 (ids/new-uuid 300)]
     (component "A new entity referring to an existing one + update existing"
-               (let [expected-id (ids/new-uuid 100)
-                     tempid1 (tempid/tempid expected-id)
-                     delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
-                                                   ::person/full-name {:after "Bob"}
-                                                   ::person/primary-address {:after existing-addr-ident}
-                                                   ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
-                            existing-addr-ident {::address/id (second existing-addr-ident)
-                                                 ::address/street {:before "A St" :after "A1 St"}}}
-                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
-                     real-id (get tempids tempid1)
-                     person (query/entities
-                              {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
-                              {::person/id real-id}
-                              (d/db *conn*))]
-                 (assertions
-                   "Gives a proper remapping"
-                   (get tempids tempid1) =fn=> uuid?
-                   "Fulcro tempid is mapped to the uuid it wraps"
-                   (get tempids tempid1) => expected-id
-                   "Updates the db with non-ref attributes"
-                   person =check=> (_/embeds?*
-                                     {::person/id real-id
-                                      ::person/full-name "Bob"
-                                      ::person/role :cz.holyjak.rad.test-schema.person.role/admin
-                                      ;::person/primary-address {::address/street "A1 St"}
-                                      #_#_::person/primary-address {:id existing-addr-ident}})
-                   "Sets the ref to primary address (and entity-query returns it as the entity id)"
-                   (::person/primary-address person) => (apply hash-map existing-addr-ident))))
+      (let [expected-id (ids/new-uuid 100)
+            tempid1 (tempid/tempid expected-id)
+            delta {[::person/id tempid1] {::person/id tempid1 ; PK value is always as-is, not wrapped in {:after ...}
+                                          ::person/full-name {:after "Bob"}
+                                          ::person/primary-address {:after existing-addr-ident}
+                                          ::person/role {:after :cz.holyjak.rad.test-schema.person.role/admin}}
+                   existing-addr-ident {::address/id (second existing-addr-ident)
+                                        ::address/street {:before "A St" :after "A1 St"}}}
+            {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})
+            real-id (get tempids tempid1)
+            person (query/entities
+                     {::attr/key->attribute key->attribute, ::asami/id-attribute {::attr/qualified-key ::person/id}}
+                     {::person/id real-id}
+                     (d/db *conn*))]
+        (assertions
+          "Gives a proper remapping"
+          (get tempids tempid1) =fn=> uuid?
+          "Fulcro tempid is mapped to the uuid it wraps"
+          (get tempids tempid1) => expected-id
+          "Updates the db with non-ref attributes"
+          person =check=> (_/embeds?*
+                            {::person/id real-id
+                             ::person/full-name "Bob"
+                             ::person/role :cz.holyjak.rad.test-schema.person.role/admin
+                             ;::person/primary-address {::address/street "A1 St"}
+                             #_#_::person/primary-address {:id existing-addr-ident}})
+          "Sets the ref to primary address (and entity-query returns it as the entity id)"
+          (::person/primary-address person) => (apply hash-map existing-addr-ident))))
+
     (component "Two new entities, one referring to another"
                (let [tempid2 (tempid/tempid id2)
                      tempid3 (tempid/tempid id3)
@@ -269,6 +274,7 @@
                    (::person/primary-address person) => {::address/id id3}
                    "Sets refs to addresses (and returns them as entity IDs)"
                    (::person/addresses person) => [(apply hash-map existing-addr-ident) {::address/id id3}])))
+
     (component "Update props and refs in entity (both to new & existing)"
                (let [id4 (ids/new-uuid 400), tempid4 (tempid/tempid id4)
                      delta {[::person/id id2] {::person/id id2
@@ -292,7 +298,64 @@
                                       ::person/full-name "June"
                                       ::person/role :cz.holyjak.rad.test-schema.person.role/admin
                                       ::person/primary-address (apply hash-map existing-addr-ident)
-                                      ::person/addresses [(apply hash-map existing-addr-ident) {::address/id id4}]}))))))
+                                      ::person/addresses [(apply hash-map existing-addr-ident) {::address/id id4}]}))))
+    (component "owned entity"
+      (let [pid (ids/new-uuid 1)
+            qid (ids/new-uuid 2)
+            tpid (tempid/tempid pid)
+            tqid (tempid/tempid qid)
+            delta {[::person/id tpid] #::person{:id tpid
+                                                :qualities {:after [[::person-quality/id tqid]]}}
+                   [::person-quality/id tqid] #::person-quality{:id tqid
+                                                                :name {:after "bravery"}}}
+            _ (asami-pathom-common/save-form! *env* {::form/delta delta})
+            q-nodeid (ffirst (d/q '[:find ?q
+                                    :in $ ?qid
+                                    :where [?q ::person-quality/id ?qid]]
+                                  (d/db *conn*) qid))]
+
+        (assertions
+          "the owner has a/owns pointed to the owned entity"
+          (d/q '[:find ?quality .
+                 :in $ ?pid
+                 :where
+                 [?person ::person/id ?pid]
+                 [?person :a/owns ?quality]] (d/db *conn*) pid) => q-nodeid
+          "an owned entity does not have a/entity"
+          (d/q '[:find [?name ?is-entity]
+                 :in $ ?qid
+                 :where
+                 [?quality ::person-quality/id ?qid]
+                 [?quality ::person-quality/name ?name]
+                 (optional [?quality :a/entity ?is-entity])]
+               (d/db *conn*) qid) => ["bravery" nil]
+          "An owned entity is created so that d/entity will include it in its parent"
+          (d/entity (d/db *conn*) [::person/id pid]) =check=> (_/embeds?*
+                                                                {::person/id pid
+                                                                 ::person/qualities
+                                                                 ;; FIXME I get 1 even though it is to-many; bug?!
+                                                                 {:id [::person-quality/id qid]
+                                                                  ::person-quality/id qid
+                                                                  ::person-quality/name "bravery"}})
+          "TMP: Low-level check of owned entity retraction"
+          (set (write/orphaned-owned-entities-retraction-txn
+                 (d/db *conn*) key->attribute
+                 {[::person/id pid] #::person{:id pid
+                                              :qualities {:before [[::person-quality/id qid]] :after nil}}}))
+          => #{[:db/retract q-nodeid :id [::person-quality/id qid]]
+               [:db/retract q-nodeid ::person-quality/id qid]
+               [:db/retract q-nodeid ::person-quality/name "bravery"]}
+
+          "owned entity is deleted when dropped from the owning attribute"
+          (do
+            (asami-pathom-common/save-form!
+              *env*
+              {::form/delta {[::person/id pid] #::person{:id pid
+                                                         :qualities {:before [[::person-quality/id qid]] :after nil}}}})
+            (d/q '[:find ?quality .
+                   :in $ ?qid
+                   :where [?quality ::person-quality/id ?qid]]
+                 (d/db *conn*) qid)) => nil)))))
 
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 ;;; TEMPID remapping
@@ -305,7 +368,7 @@
                      delta   {[::person/id tempid1]  {::person/id              tempid1
                                                       ::person/primary-address {:after [::address/id tempid2]}}
                               [::address/id tempid2] {::address/street {:after "A1 St"}}}
-                     {:keys [tempids] :as X} (asami-pathom-common/save-form! *env* {::form/delta delta})]
+                     {:keys [tempids]} (asami-pathom-common/save-form! *env* {::form/delta delta})]
                  (assertions
                    "Returns tempid remappings"
                    tempids =fn=> not-empty
@@ -351,8 +414,8 @@
 ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
 
 (specification "Pathom parser integration (save + generated resolvers)"
-               (let [save-middleware     (asami/wrap-save)
-                     delete-middleware   (asami/wrap-delete)
+               (let [_save-middleware     (asami/wrap-save)
+                     _delete-middleware   (asami/wrap-delete)
                      automatic-resolvers (asami/generate-resolvers all-attributes :production)
                      parser (universal-parser all-attributes [automatic-resolvers form/resolvers])]
                  #_ ; TODO We do not support native IDs yet (and person has been changed not to have it)

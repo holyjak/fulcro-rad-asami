@@ -10,6 +10,7 @@
     [com.fulcrologic.guardrails.core :refer [>defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
+    [cz.holyjak.rad.database-adapters.asami :as-alias asami]
     [cz.holyjak.rad.database-adapters.asami.duplicates :as dups]
     [cz.holyjak.rad.database-adapters.asami.util :as util :refer [ensure! ref? to-one?]]
     [taoensso.timbre :as log]))
@@ -48,21 +49,37 @@
      :tx-data   (concat retracts triples)
      :tempids   @vtempids}))
 
+(defn non-id-schema-attr?                                         ; copied from datomic-common + add docs, renamed
+  "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
+  [target-schema attr]
+  (let [{::attr/keys [identity? schema]} attr]
+    (and (= schema target-schema) (not identity?))))
+
 (defn non-id-schema-prop?                                         ; copied from datomic-common + add docs, renamed
   "The attribute belongs to the current schema (= DB) and is a normal property, i.e. not the ID"
   [{::attr/keys [key->attribute]} target-schema k]
-  (let [{:keys [::attr/schema]
-         ::attr/keys [identity?]} (key->attribute k)]
-    (and (= schema target-schema) (not identity?))))
+  (if-let [attr (key->attribute k)]
+    (non-id-schema-attr? target-schema attr)
+    (do
+      (log/warn "Encountered unknown attribute" k
+                "Is it properly registered with Pathom?"
+                "Known nr. attrs = " (count key->attribute))
+      nil)))
+
+(defn- ident->node-id
+  "Leverage `:id` to find the node-id of the given ident's entity"
+  [graph ident]
+  (try (ffirst (graph/resolve-triple graph '?n :id ident))
+       (catch #?(:clj ClassCastException :cljs :default) e
+         (throw (ex-info (str "Finding Asami node with :id " (pr-str ident)
+                              " failed. Possibly there is a type mismatch between"
+                              " its value and the corresponding DB value. (Are you"
+                              " passing a string where DB has an uuid <=> forget to"
+                              " prefix it with `#uuid` ?) Error: " (ex-message e))
+                         {:ident ident})))))
 
 (defn- clear-entity-singular-attributes-txn [graph [ident singular-props]]
-  (if-let [node-id (try (ffirst (graph/resolve-triple graph '?n :id ident))
-                        (catch #?(:clj ClassCastException :cljs :default) e
-                          (throw (ex-info (str "Finding Asami node with :id " (pr-str ident)
-                                               " failed. Possibly there is a type mismatch between"
-                                               " its value and the corresponding DB value. (Did you"
-                                               " forget #uuid ?) Error: " (ex-message e))
-                                          {:ident ident}))))]
+  (if-let [node-id (ident->node-id graph ident)]
     (for [prop singular-props
           :let [existing-val (ffirst (ensure!
                                        (graph/resolve-triple graph node-id prop '?xval)
@@ -73,6 +90,11 @@
     (do (log/warn "Expected to find an entity with the ident" ident "to clear its singular props but no match")
         nil)))
 
+(defn- as-graph [graph-or-db]
+  (if (satisfies? graph/Graph graph-or-db)
+    graph-or-db
+    (d/graph graph-or-db)))
+
 (defn clear-singular-attributes-txn
   "Generate retractions for existing values of the given `singular-props` attributes of the given `ident` entities
   NOTE: It only clears the single attribute. If it points to a dependant entity, it remains in existence.
@@ -80,19 +102,25 @@
   ;; Perhaps add an attribute flag telling us what entities cannot exist on their own and only have 1 parent and thus
   ;; should be deleted?
   [graph-or-db ident->singular-props]
-  (let [graph (if (satisfies? graph/Graph graph-or-db)
-                graph-or-db
-                (d/graph graph-or-db))]
-    (->> (mapcat (partial clear-entity-singular-attributes-txn graph) ident->singular-props)
-         not-empty)))
+  (->> (mapcat (partial clear-entity-singular-attributes-txn (as-graph graph-or-db)) ident->singular-props)
+       not-empty))
 
-(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as env} schema entity-delta]
+(defn keep-attr-deltas
+  "Like core/keep on the seq of entity delta entries, but with the signature `(fn [rad-attribute {:keys [before after]}])`.
+  Notice the rad-attribute could be `nil`, e.g. if not properly registered with Pathom.
+  Here, `entity-delta` is typically the map `{<qualified attr key> {:before .., :after ...}, ...}`."
+  [attr-filter-fn key->attribute entity-delta]
+  (keep (fn [[attr-key attr-delta]] (attr-filter-fn (get key->attribute attr-key) attr-delta)) entity-delta))
+
+(defn- entity-delta->singular-attrs [{::attr/keys [key->attribute] :as _env} schema entity-delta]
   (->> entity-delta
-       (filter (fn [[k v]] (and (util/to-one? env k)
-                                (non-id-schema-prop? env schema k)
-                                (map? v)
-                                (contains? v :after))))
-       (map key)
+       (keep-attr-deltas (fn [attr attr-delta]
+                           (when (and (not (attr/to-many? attr))
+                                      (non-id-schema-attr? schema attr)
+                                      (map? attr-delta) ; being extra cautious here...
+                                      (contains? attr-delta :after)) ; notice the value could be nil => need contains?
+                             (::attr/qualified-key attr)))
+                            key->attribute)
        set
        not-empty))
 
@@ -141,14 +169,21 @@
 (defn generate-id                                           ; based on ...database-adapters.key-value.pathom/unwrap-id
   "Generate an id for a new entity being  saved. You need to pass a `suggested-id` as a UUID or a tempid.
   If it is a tempid and the ID column is a UUID, then the UUID *from* the tempid will be used."
-  [{::attr/keys [key->attribute] :as env} k suggested-id]
-  (let [{::attr/keys [type]} (key->attribute k)]
+  [{::attr/keys [key->attribute] :as _env} k suggested-id]
+  (let [{::attr/keys [type] :as attr} (key->attribute k)]
+    (when-not attr
+      (throw (ex-info (str "Couldn't find the attribute "
+                           k
+                           ", is it properly registered with Pathom?")
+                      {:attribute-name k,
+                       :known-attrs (keys key->attribute)})))
     (cond
       (= :uuid type) (cond
                        (tempid/tempid? suggested-id) (:id suggested-id)
                        (uuid? suggested-id) suggested-id    ; does this ever happen?
                        :else (throw (ex-info "Only unwrapping of tempid/uuid is supported" {:id suggested-id})))
-      :otherwise (throw (ex-info "Don't know how to generate an ID for non-uuid ID attribute" {:attribute k})))))
+      :else (throw (ex-info "Don't know how to generate an ID for non-uuid ID attribute"
+                            {:attribute-name k, :type type, :attr attr})))))
 
 (defn ^:no-doc create-tempid->generated-id [env delta]
   (dups/tempids->generated-ids generate-id env delta))
@@ -171,36 +206,53 @@
 (defn new-entity-ident->tx-data
   "Produce the tx-data for `d/transact` necessary to add a new entity - typically adding the ident's key and value as
   a property plus other required entity properties."
-  [[id-prop id-val :as ident]]
-  ;; NOTE: We assume tempids have been resolved and replaced with real ones by now
-  (let [eid (ident->asami-lookup-ref nil ident)]
-    [[:db/add eid :id ident] ; add the internal Asami :id prop
-     [:db/add eid id-prop id-val]   ; add the external id itself
-     [:db/add eid :a/entity true]])) ; mark it as standalone entity => only ref-ed, not inlined when fetching a parent one
+  ([ident] (new-entity-ident->tx-data nil ident))
+  ([key->attribute [id-prop id-val :as ident]]
+   ;; NOTE: We assume tempids have been resolved and replaced with real ones by now
+   (let [entity? (not (::asami/owned-entity? (get key->attribute id-prop)))
+         eid (ident->asami-lookup-ref nil ident)]
+     (cond-> [[:db/add eid :id ident] ; add the internal Asami :id prop
+              [:db/add eid id-prop id-val]]  ; add the external id itself
+             entity? (conj [:db/add eid :a/entity true]))))) ; mark it as standalone entity => only ref-ed, not inlined when fetching a parent one
+
+(defn- ref-to-owned-entity?
+  "Is the given attribute a :ref and the target entity is dependent on it, i.e. marked with `::asami/owned-entity?`?"
+  [key->attribute attr-key]
+  (let [{::attr/keys [target type]} (get key->attribute attr-key)]
+    (and (= type :ref)
+         (::asami/owned-entity? (get key->attribute target)))))
 
 (defn ^:no-doc prop->tx-data
   "Add/remove the property's value(s) into/from Asami.
   For singular attributes, the value needs to be wrapped in a set.
   References are encoded in the way Asami expects."
-  [{:keys [tempid->real-id] :as env+} operation eid k vals]
-  (let [ref?? (ref? env+ k)]
-    (mapv (fn [v] [operation
-                   eid
-                   k
-                   (cond->> v
-                            ref?? (ident->asami-lookup-ref tempid->real-id))])
-          vals)))
+  [{:keys [::attr/key->attribute tempid->real-id] :as env+} operation eid k vals]
+  (->> vals
+       (mapcat (fn [v]
+                 (let [real-id (when (ref? env+ k)
+                                 (ident->asami-lookup-ref tempid->real-id v))]
+                   (cond-> [[operation eid k (or real-id v)]]
+                           (and (ref-to-owned-entity? key->attribute k) (= operation :db/add)) ; TODO Do we need to retract manually too
+                           (conj [:db/add eid :a/owns real-id])))))
+       (into [])))
 
-(defn prop-delta->tx-data
-  "Turns a single delta for a single entity and property into transaction(s) (multiple if cardinality = many)"
-  [env+ eid k {:keys [before after] :as delta}] cat
-  ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
-
-  (let [singular? (to-one? env+ k)
+(defn attr-delta->before+after-sets
+  "Returns the before and after of the delta as sets (or nil, if missing), whether singular or not.
+  Thus downstream code doesn't need to care about arity."
+  [env attr-key {:keys [before after] :as _attr-delta}]
+  (let [singular? (to-one? env attr-key)
         ;; We turn singular values into a set so we can handle them in the same way as to-many; Asami does insert each
         ;; set value separately, ie. never the whole set as-is.
         before (if singular? (some-> before hash-set) (set before))
         after (if singular? (some-> after hash-set) (set after))]
+    [before after]))
+
+(defn prop-delta->tx-data
+  "Turns a single delta for a single entity and property into transaction(s) (multiple if cardinality = many)"
+  [{::attr/keys [#_key->attribute] :as env+} eid k attr-delta]
+  ;; NOTE: `delta` is typically map {:before <val>, :after <val>} expect for the ID attribute
+  (let [singular? (to-one? env+ k)
+        [before after] (attr-delta->before+after-sets env+ k attr-delta)]
     (concat
       ;; Note: Singular attr values are retracted separately, see clear-singular-attributes-txn
       (when-not singular? (prop->tx-data env+ :db/retract eid k (set/difference before after)))
@@ -219,14 +271,14 @@
     delta))
 
 (defn ^:no-doc  delta->txn*
-  [env schema delta]
+  [{::attr/keys [key->attribute] :as env} schema delta]
   (let [tempid->generated-id (create-tempid->generated-id env delta)
         ;;; For new entities being created, add the identifier attributes - the :<entity>/id <val> and :id <ident> ones:
         new-ids-txn (eduction
                       ;; There are likely better ways to do this, e.g. checking (and (tempid/tempid? id) (uuid-ident? env ident))
                       (map (partial ident->asami-lookup-ref tempid->generated-id))
                       (filter (comp ::new? meta))
-                      (mapcat (comp new-entity-ident->tx-data asami-lookup-ref->ident))
+                      (mapcat (comp (partial new-entity-ident->tx-data key->attribute) asami-lookup-ref->ident))
 
                       (keys delta))]
     {:tempid->generated-id tempid->generated-id
@@ -237,6 +289,35 @@
                   (delta->value-txn
                     (assoc env :tempid->real-id tempid->generated-id)
                     schema delta)))}))
+
+(defn orphaned-owned-entities-retraction-txn
+  "Make a retraction txn including all 'owned' entities that their parents stopped referring to.
+  (Essentially, implementing cascading delete.)"
+  [graph-or-db key->attribute delta]
+  (let [env {::attr/key->attribute key->attribute}]
+    (letfn [(owned-idents-to-delete [[attr-key attr-delta]]
+              (when (ref-to-owned-entity? key->attribute attr-key)
+                (->> (attr-delta->before+after-sets env attr-key attr-delta)
+                     (apply set/difference)
+                     not-empty)))
+            (ident->retractions [graph ident]
+              (let [node-id (ident->node-id graph ident)]
+                (->> (graph/resolve-triple graph node-id '?prop '?val)
+                     (mapv (fn [prop+val] (into [:db/retract node-id] prop+val))))))
+            (delta->idents-to-remove [delta]
+              (transduce
+                (comp
+                  (keep (fn [[[_ id-val] entity-delta]]
+                          (when-not (tempid/tempid? id-val)
+                            (eduction
+                              (keep owned-idents-to-delete)
+                              entity-delta))))
+                  cat)
+                into #{}
+                delta))]
+      (->> (delta->idents-to-remove delta)
+           (into [] (comp (map (partial ident->retractions (as-graph graph-or-db))) cat))
+           not-empty))))
 
 (>defn delta->txn-map-with-retractions
   "Turn Fulcro form delta into an Asami update transaction. Example delta (only one entry):
@@ -253,6 +334,9 @@
   [{::attr/keys [key->attribute] :as env} graph-or-db schema delta]
   [::env  any? keyword? map? => map?]
   (let [retractions (->> (delta->singular-attrs-to-clear key->attribute schema delta)
-                         (clear-singular-attributes-txn graph-or-db))
+                         (clear-singular-attributes-txn graph-or-db)
+                         (concat (orphaned-owned-entities-retraction-txn graph-or-db key->attribute delta))
+                         (remove nil?)
+                         not-empty)
         changes  (delta->txn* env schema delta)]
     (update changes :txn (partial concat retractions))))

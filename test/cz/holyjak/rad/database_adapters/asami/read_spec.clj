@@ -1,6 +1,6 @@
 (ns cz.holyjak.rad.database-adapters.asami.read-spec
   (:require
-    [fulcro-spec.core :refer [specification assertions when-mocking => =fn=> =throws=>]]
+    [fulcro-spec.core :refer [specification assertions => =throws=>]]
     [cz.holyjak.rad.test-schema.person :as person]
     [cz.holyjak.rad.test-schema.address :as address]
     [cz.holyjak.rad.test-schema.thing :as thing]

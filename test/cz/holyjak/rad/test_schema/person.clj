@@ -1,9 +1,6 @@
 (ns cz.holyjak.rad.test-schema.person
   (:require
-    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    [cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
-    [taoensso.timbre :as log]))
+    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]))
 
 (defattr id ::id :uuid ;:long
   {::attr/identity?                                         true
@@ -53,6 +50,13 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
+(defattr qualities ::qualities :ref
+  {::attr/target      :cz.holyjak.rad.test-schema.person-quality/id
+   ;::asami/ownership? true
+   ::attr/cardinality :many
+   ::attr/schema      :production
+   ::attr/identities  #{::id}})
+
 (defattr things ::things :ref
   {::attr/target      :cz.holyjak.rad.test-schema.thing/id
    ::attr/cardinality :many
@@ -64,7 +68,7 @@
    ::attr/schema      :production
    ::attr/identities  #{::id}})
 
-(def attributes [id full-name email nicks primary-address addresses role permissions things account-balance])
+(def attributes [id full-name email nicks primary-address addresses qualities role permissions things account-balance])
 
 (comment
   (defn entries->map
@@ -75,16 +79,16 @@
          (map #(apply hash-map %))
          (apply (partial merge-with into))))
 
-  (require '[cz.holyjak.rad.database-adapters.asami.write :as w] '[com.fulcrologic.fulcro.algorithms.tempid :as tempid])
-  (let [env {::attr/key->attribute (-> (group-by ::attr/qualified-key attributes) (update-vals first))}]
-    (->
-      (->> {::full-name "Bob"
-            ::permissions [:read :write]
-            ::things [[:thing/id :existing1]
-                      [:thing/id (tempid/tempid)]]}         ; FIXME the tempid is not moved out to the `true` part !!!
-           (mapcat (fn [[k vs :as entry]] (if (w/to-one? env k) [entry] (map #(vector k [%]) vs))))
-           (group-by (fn new-entity-ref? [[prop maybe-ident]]
-                       (boolean (and (w/ref? env prop) (tempid/tempid? (second maybe-ident)))))))
-      (update-vals entries->map)))
+  ;(require '[cz.holyjak.rad.database-adapters.asami.write :as w])
+  ;(let [env {::attr/key->attribute (-> (group-by ::attr/qualified-key attributes) (update-vals first))}]
+  ;  (->
+  ;    (->> {::full-name "Bob"
+  ;          ::permissions [:read :write]
+  ;          ::things [[:thing/id :existing1]
+  ;                    [:thing/id (tempid/tempid)]]}         ; FIXME the tempid is not moved out to the `true` part !!!
+  ;         (mapcat (fn [[k vs :as entry]] (if (w/to-one? env k) [entry] (map #(vector k [%]) vs))))
+  ;         (group-by (fn new-entity-ref? [[prop maybe-ident]]
+  ;                     (boolean (and (w/ref? env prop) (tempid/tempid? (second maybe-ident)))))))
+  ;    (update-vals entries->map)))
 
   )

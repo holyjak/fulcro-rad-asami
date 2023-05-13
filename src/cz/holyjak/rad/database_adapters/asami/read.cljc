@@ -61,8 +61,7 @@
                       {:attribute-key k, :attribute-value v})))
     (cond-> v
             (nil? v)
-            (do (log/warn "nil value in database for attribute" k) ; Note: Not sure that this can ever happen
-                v)
+            (->> (do (log/warn "nil value in database for attribute" k)))  ; Note: Not sure that this can ever happen
 
             ;; NOTE: Asami returns to-many props as a set if 2+ values or a single value if just one
             ;; => unify to always be a vector
@@ -153,9 +152,10 @@
 
 (comment
   ;(ids->entities cz.holyjak.rad.database-adapters.asami.core/dbm :order/id [1])
-  (entities {::asami/id-attribute {::attr/qualified-key :order/id}}
-            {:order/id 2}
-            (d/connect (cz.holyjak.rad.database-adapters.asami/config->url {:asami/driver :local, :asami/database "playground3"})))
+
+  ;(entities {::asami/id-attribute {::attr/qualified-key :order/id}}
+  ;          {:order/id 2}
+  ;          (d/connect (cz.holyjak.rad.database-adapters.asami/config->url {:asami/driver :local, :asami/database "playground3"})))
 
   ;(sp/select
   ;  (sp/walker #(and (map? %) (= :join (:type %))))
