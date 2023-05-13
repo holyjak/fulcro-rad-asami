@@ -46,20 +46,38 @@
   (#'asami.core/as-graph dbm)
   (satisfies? asami.graph/Graph dbm)
 
-  (d/delete-database "asami:mem://test123")
-  (d/create-database "asami:mem://test123")
-  (def conn (d/connect "asami:mem://test123"))
+  @(d/transact conn {:tx-data [;; child
+                               [:db/add :child/first :id :child/first]
+                               [:db/add :child/first :child/name "Kiddy"]
+                               ;; parent
+                               [:db/add :parent/one :id :parent/one]
+                               [:db/add :parent/one :parent/name "Father"]
+                               [:db/add :parent/one :a/entity true]
+                               [:db/add :parent/one :a/owns :child/first]
+                               [:db/add :parent/one :parent/child :child/first]]})
+
+  (do
+    (d/delete-database "asami:mem://test123")
+    (d/create-database "asami:mem://test123")
+    (def conn (d/connect "asami:mem://test123"))
+    (->
+      @(d/transact conn {:tx-data [;; child
+                                   [:db/add [:child/id 1] :id [:child/id 1]]
+                                   [:db/add [:child/id 1] :child/name "Kiddy"]
+                                   ;; parent
+                                   [:db/add [:parent/id 10] :id [:parent/id 10]]
+                                   [:db/add [:parent/id 10] :parent/name "Father"]
+                                   [:db/add [:parent/id 10] :a/entity true]
+                                   [:db/add [:parent/id 10] :a/owns :child/first]
+                                   [:db/add [:parent/id 10] :parent/child :child/first]]})
+      #_@(d/transact conn {:tx-data
+                           [{:id :parent/one,
+                             :parent/name "Father"
+                             :parent/child {:id :child/first, :child/name "Kiddy"}}]})
+      :tx-data))
   (->
     ; only parent has :a/entity true, :a/owns <node>
-    @(d/transact conn {:tx-data [;; child
-                                 [:db/add :child/first :id :child/first]
-                                 [:db/add :child/first :child/name "Kiddy"]
-                                 ;; parent
-                                 [:db/add :parent/one :id :parent/one]
-                                 [:db/add :parent/one :parent/name "Father"]
-                                 [:db/add :parent/one :a/entity true]
-                                 [:db/add :parent/one :a/owns :child/first]
-                                 [:db/add :parent/one :parent/child :child/first]]})
+    @(d/transact conn {:tx-data [{:id :parent/one, :parent/child' #{}}]})
     :tx-data)
 
   (d/entity (d/db conn) :parent/one)

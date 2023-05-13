@@ -1,7 +1,6 @@
 (ns cz.holyjak.rad.test-schema.thing
   (:require
-    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    [cz.holyjak.rad.database-adapters.asami-options :as aso]))
+    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]))
 
 (defattr id ::id :long
   {::attr/identity? true

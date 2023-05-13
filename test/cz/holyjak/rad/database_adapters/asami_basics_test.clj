@@ -1,5 +1,5 @@
 (ns cz.holyjak.rad.database-adapters.asami-basics-test
-  (:require [clojure.test :refer :all]
+  (:require [clojure.test :refer [deftest is use-fixtures]]
             [asami.core :as d]
             [cz.holyjak.rad.database-adapters.asami.write :as write]))
 

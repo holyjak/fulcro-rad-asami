@@ -1,8 +1,6 @@
 (ns cz.holyjak.rad.test-schema.person
   (:require
-    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]
-    ;[cz.holyjak.rad.database-adapters.asami-options :as aso]
-    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]))
+    [com.fulcrologic.rad.attributes :as attr :refer [defattr]]))
 
 (defattr id ::id :uuid ;:long
   {::attr/identity?                                         true

@@ -32,7 +32,7 @@
   "Copied from or very similar to datomic function of same name"
   [unwrap-id {_ ::attr/key->attribute :as env} delta]
   (let [idents                      (keys delta)
-        fulcro-tempid->generated-id (into {} (keep (fn [[k id :as ident]]
+        fulcro-tempid->generated-id (into {} (keep (fn [[k id :as _ident]]
                                                      (when (tempid/tempid? id)
                                                        [id (unwrap-id env k id)])) idents))]
     fulcro-tempid->generated-id))

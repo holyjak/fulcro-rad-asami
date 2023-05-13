@@ -1,1 +1,2 @@
-{:lint-as {taoensso.encore/if-let clojure.core/let}}
+{:lint-as {taoensso.encore/if-let clojure.core/let}
+ :output {:exclude-files [".clj-kondo/potemkin"]}}

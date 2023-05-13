@@ -23,10 +23,11 @@
 (def wrap-env apc/wrap-env)
 (def wrap-save apc/wrap-save)
 
-(defn- pathom-version []
-  (if (try (do (require 'com.wsscode.pathom.connect) true) (catch #?(:clj Exception :cljs :default) _ false))
-    2
-    3))
+#?(:clj
+   (defn- pathom-version []
+     (if (try (require 'com.wsscode.pathom.connect) true (catch #?(:clj Exception :cljs :default) _ false))
+       2
+       3)))
 
 #?(:clj
    (def generate-resolvers
