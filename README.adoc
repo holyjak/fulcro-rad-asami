@@ -20,7 +20,7 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 ```clojure
 ;; in deps.edn:
 {:deps {cz.holyjak/fulcro-rad-asami {:git/url "https://github.com/holyjak/fulcro-rad-asami"
-                                     :sha "4f1627da68943eba774a826076f9f6f31f7925cb"}
+                                     :sha "fb9c6c0bf8af1c22284afe1f6711575319827aba"}
         ;; pick ONE of Pathom v2 and Pathom3:
         com.wsscode/pathom3 {:mvn/version "2023.01.24-alpha"}
         ;com.wsscode/pathom {:mvn/version "2.4.0"}
