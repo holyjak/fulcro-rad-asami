@@ -67,6 +67,12 @@
       <version>2.4.0</version>
       <scope>provided</scope>
     </dependency>
+    <dependency> <!-- for CljDoc's analysis -->
+      <groupId>com.wsscode</groupId>
+      <artifactId>pathom3</artifactId>
+      <version>2023.01.31-alpha</version>
+      <scope>provided</scope>
+    </dependency>
   </dependencies>
   <build>
     <sourceDirectory>src</sourceDirectory>
