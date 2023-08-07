@@ -21,3 +21,12 @@
 ;  "Attribute option. Defaults to false. Set true for the generated id-resolvers to fetch all referenced
 ;  entities, not just their IDs. You normally do not want that. See `asami.core/entity`"
 ;  :cz.holyjak.rad.database-adapters.asami/fetch-nested?)
+
+(def owned-entity?
+  "ID attribute property. Marks the entity as dependant, i.e. it can only exist as part of another entity
+   - f.ex. an OrderLine can only exist as a part of an Order.
+  It is marked in Asami as \"owned\" by the parent entity and thus `(d/entity parent-entity)`
+  will include its full data and, most importantly, removing it from the `:ref` attribute on the parent
+  will delete it fully from the DB
+  (notice that this \"cascading delete\" is a feature of this adapter, not of Asami itself)."
+  :cz.holyjak.rad.database-adapters.asami/owned-entity?)

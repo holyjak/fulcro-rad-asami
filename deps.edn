@@ -1,6 +1,6 @@
 {;:paths   ["src/shared" "src/asami"]
 
- :deps    {org.clojars.quoll/asami {:mvn/version "2.3.2"}
+ :deps    {org.clojars.quoll/asami {:mvn/version "2.3.3"}
            com.fulcrologic/fulcro-rad             {:mvn/version "1.4.0"} ; Note: We need Fulcro 3.5.3+ so default vals etc have correct diffs
            edn-query-language/eql                 {:mvn/version "1.0.1"}
            com.taoensso/encore                    {:mvn/version "3.1.0"}

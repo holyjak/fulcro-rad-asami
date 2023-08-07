@@ -151,7 +151,8 @@
        db ident))
 
 (defn retract-entity
-  "Retract a (flat) entity from the DB, given the value of its `:id` attribute. Returns same as `d/transact`"
+  "Retract a (flat) entity from the DB, given the value of its `:id` attribute (i.e, typically a Fulcro ident).
+  Returns same as `d/transact`"
   [conn id]
   (let [retract-txn (retract-entity-txn (d/db conn) id)
         retract-id (first (filter #(= :id (nth % 2)) retract-txn))
@@ -198,10 +199,11 @@
   "Turn a Fulcro ident into something Asami interprets as an entity id / lookup reference
   NOTE: If this is a new entity then the metadata `::new?` is added to it.
   See [[asami-lookup-ref->ident]] for the opposite."
-  [tempid->real-id [key id :as ident]]
-  (if-let [id' (when tempid->real-id (tempid->real-id id))]
-    (with-meta [:id [key id']] {::new? true})
-    [:id ident]))
+  ([ident] (ident->asami-lookup-ref nil ident))
+  ([tempid->real-id [key id :as ident]]
+   (if-let [id' (when tempid->real-id (tempid->real-id id))]
+     (with-meta [:id [key id']] {::new? true})
+     [:id ident])))
 
 (defn new-entity-ident->tx-data
   "Produce the tx-data for `d/transact` necessary to add a new entity - typically adding the ident's key and value as

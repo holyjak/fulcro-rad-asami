@@ -2,6 +2,7 @@
   "Support for reading RAD entities from Asami"
   (:require
     [clojure.spec.alpha :as s]
+    [com.fulcrologic.fulcro.algorithms.tempid :as tempid]
     [com.fulcrologic.guardrails.core :refer [>def >defn =>]]
     [com.fulcrologic.rad.attributes :as attr]
     [cz.holyjak.rad.database-adapters.asami :as-alias asami]
@@ -105,7 +106,8 @@
    (sequence
      ;; NOTE: For refs this will return just *ID-maps*; ex.: `{:id [:address/id 123]}`. To return the full
      ;; data of the child, we would need to pass the 3rd argument (nested?) as true
-     (comp (map #(d/entity db [qualified-key %] nested?))
+     (comp (remove tempid/tempid?)
+           (map #(d/entity db [qualified-key %] nested?))
            (remove nil?)) ; note: remove nil? messes up with Pathom batching expecting the same number of results, with
                           ; id for the missing; fortunately P. provides a fn to fix it upstream, which we do
      ids)))
