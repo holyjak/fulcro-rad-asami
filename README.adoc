@@ -275,3 +275,20 @@ Also see the `(comment ..)` at the bottom of most `-spec` tests for running thos
 ====
 
 then run `(fulcro-spec.reporters.repl/run-tests (comp :focus meta))`
+
+=== Releasing
+
+First, **update version** in `build.clj`:
+
+```diff
+- (def version "1.0.2")
++ (def version "1.0.3")
+```
+
+then build and release to Clojars:
+
+```bash
+bb run # build
+clj -Spom # refresh pom
+env CLOJARS_USERNAME=holyjak CLOJARS_PASSWORD=<secret> clj -X:deploy
+```
