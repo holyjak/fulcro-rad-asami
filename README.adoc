@@ -1,6 +1,7 @@
 = Asami Database Plugin for Fulcro RAD
 
-image::https://img.shields.io/clojars/v/cz.holyjak/fulcro-rad-asami.svg[Clojars Project,link=https://clojars.org/cz.holyjak/fulcro-rad-asami]
+image:https://img.shields.io/clojars/v/cz.holyjak/fulcro-rad-asami.svg[Clojars Project,link=https://clojars.org/cz.holyjak/fulcro-rad-asami]
+image:https://cljdoc.org/badge/cz.holyjak/fulcro-rad-asami[cljdoc,link=https://cljdoc.org/d/cz.holyjak/fulcro-rad-asami]
 
 This is a plugin for Fulcro RAD that adds support for using Asami databases (both in-memory and disk-based ones) as the back-end technology.
 
