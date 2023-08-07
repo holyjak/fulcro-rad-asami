@@ -285,6 +285,8 @@ First, **update version** in `build.clj`:
 + (def version "1.0.3")
 ```
 
+and ideally also `scm > tag` in `pom.xml`,
+
 then build and release to Clojars:
 
 ```bash
