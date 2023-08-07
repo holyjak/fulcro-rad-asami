@@ -3,10 +3,10 @@
   (:require [clojure.tools.build.api :as b]))
 
 (def lib 'cz.holyjak/fulcro-rad-asami)
-(def version "0.0.1")
+(def version "1.0.2")
 (def class-dir "target/classes")
 (def basis (b/create-basis {:project "deps.edn"}))
-(def jar-file (format "target/%s-%s.jar" (name lib) version))
+(def jar-file (format "target/%s.jar" (name lib) #_version))
 
 (defn clean [_]
   (b/delete {:path "target"}))

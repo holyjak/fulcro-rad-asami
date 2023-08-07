@@ -1,10 +1,16 @@
 = Asami Database Plugin for Fulcro RAD
 
+image::https://img.shields.io/clojars/v/cz.holyjak/fulcro-rad-asami.svg[Clojars Project,link=https://clojars.org/cz.holyjak/fulcro-rad-asami]
+
 This is a plugin for Fulcro RAD that adds support for using Asami databases (both in-memory and disk-based ones) as the back-end technology.
 
 == Status
 
-Alpha
+Stable
+
+=== Maintenance mode
+
+The plugin is now stable and in maintenance mode. Feel free to report bugs and submit PRs, they will be reviewed and processed.
 
 == Usage
 
@@ -19,10 +25,9 @@ Every entity stored in Asami must have the property `:id <ident>`. Entities crea
 .Add the dependency
 ```clojure
 ;; in deps.edn:
-{:deps {cz.holyjak/fulcro-rad-asami {:git/url "https://github.com/holyjak/fulcro-rad-asami"
-                                     :sha "fb9c6c0bf8af1c22284afe1f6711575319827aba"}
+{:deps {cz.holyjak/fulcro-rad-asami {:mvn/version "RELEASE"}
         ;; pick ONE of Pathom v2 and Pathom3:
-        com.wsscode/pathom3 {:mvn/version "2023.01.24-alpha"}
+        com.wsscode/pathom3 {:mvn/version "2023.01.31-alpha"}
         ;com.wsscode/pathom {:mvn/version "2.4.0"}
 }}
 ```

@@ -28,4 +28,9 @@
                        :extra-deps {lambdaisland/kaocha {:mvn/version "1.68.1059"}}}
 
            :build       {:deps       {io.github.clojure/tools.build {:git/tag "v0.9.4" :git/sha "76b78fe"}}
-                         :ns-default build}}}
+                         :ns-default build}
+           :deploy {:extra-deps {slipset/deps-deploy {:mvn/version "RELEASE"}}
+                    :exec-fn deps-deploy.deps-deploy/deploy
+                    :exec-args {:installer :remote
+                                :sign-releases? true
+                                :artifact "target/fulcro-rad-asami.jar"}}}}
